@@ -1,0 +1,8 @@
+[package]
+name = "kbd-debounce"
+version = "0.1.0"
+edition = "2021"
+description = "System-level keyboard debounce daemon for faulty switches (evdev/uinput)"
+
+[dependencies]
+evdev = "0.12"
