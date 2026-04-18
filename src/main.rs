@@ -170,14 +170,11 @@ fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::err
         builder = builder.with_keys(keys)?;
     }
 
-    // Mirror LEDs so Num/Caps/Scroll-lock indicators still work
-    if let Some(leds) = real.supported_leds() {
-        builder = builder.with_leds(leds)?;
-    }
+
 
     // Mirror misc events (some keyboards use them)
     if let Some(misc) = real.misc_properties() {
-        builder = builder.with_misc(misc)?;
+        builder = builder.with_msc(misc)?;
     }
 
     Ok(builder.build()?)
