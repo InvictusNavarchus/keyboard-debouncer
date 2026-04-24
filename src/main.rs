@@ -20,7 +20,7 @@ use evdev::{
 use std::{
     env,
     path::PathBuf,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 // ── configuration ────────────────────────────────────────────────────────────
@@ -92,8 +92,7 @@ fn run_filter_loop(
 
     loop {
         for event in real.fetch_events()? {
-
-            let forward = should_forward(
+            let forward = process_event(
                 &event,
                 threshold,
                 extended_threshold,
@@ -105,14 +104,13 @@ fn run_filter_loop(
 
             if forward {
                 virt.emit(&[event])?;
-            } else {
-                log_suppressed(&event);
             }
         }
     }
 }
 
-/// Returns `true` if the event should be forwarded to the virtual device.
+/// Decide whether the event should be forwarded, log it with full context,
+/// and update all relevant state.
 ///
 /// Logic for TARGET_KEY DN (value == 1):
 ///   • If no previous UP was forwarded, let it through.
@@ -128,8 +126,8 @@ fn run_filter_loop(
 ///     duration was short (< 20 ms) to trigger extended threshold next cycle.
 ///
 /// Logic for TARGET_KEY repeat (value == 2) and all other keys:
-///   • Forward unconditionally.
-fn should_forward(
+///   • Forward unconditionally (no logging — would be extremely noisy).
+fn process_event(
     event: &InputEvent,
     threshold: Duration,
     extended_threshold: Duration,
@@ -138,64 +136,99 @@ fn should_forward(
     suppressed: &mut bool,
     last_hold_was_short: &mut bool,
 ) -> bool {
-    // Only inspect key events for our target
+    // Non-target key or repeat: pass through silently.
     if event.kind() != InputEventKind::Key(TARGET_KEY) {
         return true;
     }
+    // Auto-repeat (value == 2): also forward silently — very different cadence
+    // from bounce and would produce extremely noisy logs.
+    if event.value() == 2 {
+        return true;
+    }
+
+    let ts = fmt_ts();
+    let active_threshold = if *last_hold_was_short {
+        extended_threshold
+    } else {
+        threshold
+    };
+    let active_threshold_ms = active_threshold.as_millis();
+    let threshold_label = if *last_hold_was_short { "extended" } else { "normal" };
 
     match event.value() {
         // ── Key Down ─────────────────────────────────────────────────────────
         1 => {
             let now = Instant::now();
-            let active_threshold = if *last_hold_was_short {
-                extended_threshold  // previous press was a brief chatter contact
-            } else {
-                threshold
-            };
 
-            let is_bounce = last_forwarded_up
-                .map(|t| now.duration_since(t) < active_threshold)
-                .unwrap_or(false);
+            match *last_forwarded_up {
+                None => {
+                    // First press ever — no reference UP to compare against.
+                    *last_dn_at = Some(now);
+                    *suppressed = false;
+                    eprintln!(
+                        "[{ts}] ↓ {TARGET_KEY:?}  FORWARD   (first press, no prior UP recorded)"
+                    );
+                    true
+                }
+                Some(last_up) => {
+                    let gap = now.duration_since(last_up);
+                    let gap_ms = gap.as_micros() as f64 / 1000.0;
 
-            if is_bounce {
-                *suppressed = true;
-                false
-            } else {
-                *last_dn_at = Some(now);
-                *suppressed = false;
-                true
+                    if gap < active_threshold {
+                        *suppressed = true;
+                        eprintln!(
+                            "[{ts}] ↓ {TARGET_KEY:?}  SUPPRESS  gap={gap_ms:.2}ms < {active_threshold_ms}ms ({threshold_label} threshold)  [chatter]"
+                        );
+                        false
+                    } else {
+                        *last_dn_at = Some(now);
+                        *suppressed = false;
+                        eprintln!(
+                            "[{ts}] ↓ {TARGET_KEY:?}  FORWARD   gap={gap_ms:.2}ms ≥ {active_threshold_ms}ms ({threshold_label} threshold)"
+                        );
+                        true
+                    }
+                }
             }
         }
 
         // ── Key Up ────────────────────────────────────────────────────────────
         0 => {
             if *suppressed {
-                // Drop the UP that pairs with the suppressed DN
+                // Drop the UP that pairs with the suppressed DN.
                 *suppressed = false;
                 *last_hold_was_short = false;
+                eprintln!(
+                    "[{ts}] ↑ {TARGET_KEY:?}  SUPPRESS  (paired UP for suppressed DN)"
+                );
                 false
             } else {
                 let now = Instant::now();
                 let hold = last_dn_at.map(|t| now.duration_since(t));
+                let hold_ms = hold.map(|h| h.as_micros() as f64 / 1000.0);
+                let hold_str = hold_ms
+                    .map(|ms| format!("{ms:.2}ms"))
+                    .unwrap_or_else(|| "?".to_string());
+
                 *last_hold_was_short = hold
                     .map(|h| h < Duration::from_millis(SHORT_HOLD_THRESHOLD_MS))
                     .unwrap_or(false);
+                *last_forwarded_up = Some(now);
 
                 if *last_hold_was_short {
+                    let next_ms = active_threshold_ms * EXTENDED_THRESHOLD_MULTIPLIER as u128;
                     eprintln!(
-                        "  [adaptive] short hold detected ({:?}) — extending threshold for next cycle",
-                        hold.unwrap_or_default()
+                        "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
+                    );
+                } else {
+                    eprintln!(
+                        "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}"
                     );
                 }
-
-                *last_forwarded_up = Some(now);
                 true
             }
         }
 
-        // ── Key Repeat (auto-repeat, value == 2) ─────────────────────────────
-        // Auto-repeat fires ~300 ms after press then at ~30 Hz — very different
-        // from bounce. Always forward.
         _ => true,
     }
 }
@@ -212,8 +245,6 @@ fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::err
     if let Some(keys) = real.supported_keys() {
         builder = builder.with_keys(keys)?;
     }
-
-
 
     // Mirror misc events (some keyboards use them)
     if let Some(misc) = real.misc_properties() {
@@ -293,14 +324,15 @@ fn parse_args() -> Result<(PathBuf, u64), Box<dyn std::error::Error>> {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-fn log_suppressed(event: &InputEvent) {
-    let action = match event.value() {
-        1 => "DN",
-        0 => "UP",
-        _ => "?",
-    };
-    eprintln!(
-        "  [suppressed] {action} {:?}  (chatter within threshold)",
-        event.kind()
-    );
+/// Returns a UTC wall-clock timestamp string: `HH:MM:SS.mmm`
+fn fmt_ts() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_secs = now.as_secs();
+    let ms = now.subsec_millis();
+    let secs = total_secs % 60;
+    let mins = (total_secs / 60) % 60;
+    let hours = (total_secs / 3600) % 24;
+    format!("{hours:02}:{mins:02}:{secs:02}.{ms:03}")
 }
