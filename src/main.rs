@@ -23,6 +23,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use colored::Colorize;
+
 // ── configuration ────────────────────────────────────────────────────────────
 
 /// Keys to debounce. Add or remove entries as needed.
