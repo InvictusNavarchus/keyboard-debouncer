@@ -15,7 +15,7 @@
 
 use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
-    AttributeSet, Device, EventType, InputEvent, InputEventKind, Key,
+    Device, InputEvent, InputEventKind, Key,
 };
 use std::{
     env,
