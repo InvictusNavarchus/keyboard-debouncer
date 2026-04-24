@@ -73,11 +73,7 @@ impl PerKeyState {
 
     /// Select the active threshold (normal or extended) and return both the duration
     /// and a label for logging, based on whether the previous hold was abnormally short.
-    fn active_threshold(
-        &self,
-        normal: Duration,
-        extended: Duration,
-    ) -> (Duration, &'static str) {
+    fn active_threshold(&self, normal: Duration, extended: Duration) -> (Duration, &'static str) {
         if self.last_hold_was_short {
             (extended, "extended")
         } else {
@@ -147,22 +143,10 @@ pub fn run_filter_loop(
 
             let state = key_states.get_mut(&target_key).unwrap();
 
-            let decision = process_event(
-                &event,
-                target_key,
-                threshold,
-                extended_threshold,
-                state,
-            );
+            let decision = process_event(&event, target_key, threshold, extended_threshold, state);
 
             let ts = crate::fmt_ts();
-            let forward = apply_decision(
-                decision,
-                &event,
-                state,
-                &ts,
-                log_forward,
-            );
+            let forward = apply_decision(decision, &event, state, &ts, log_forward);
 
             if forward {
                 virt.emit(&[event])?;
@@ -247,7 +231,10 @@ fn process_event(
                 }
             } else {
                 let (hold, hold_str) = fmt_hold(state.last_dn_at);
-                let reason = if hold.map(|h| h < Duration::from_millis(SHORT_HOLD_THRESHOLD_MS)).unwrap_or(false) {
+                let reason = if hold
+                    .map(|h| h < Duration::from_millis(SHORT_HOLD_THRESHOLD_MS))
+                    .unwrap_or(false)
+                {
                     let next_ms = EXTENDED_THRESHOLD_MS;
                     format!(
                         "{key:?}  hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
@@ -279,7 +266,11 @@ fn apply_decision(
             let msg = format!(
                 "{} {} {}",
                 ts.dimmed(),
-                if event.value() == 1 { "↓ FORWARD".green() } else { "↑ FORWARD".green() },
+                if event.value() == 1 {
+                    "↓ FORWARD".green()
+                } else {
+                    "↑ FORWARD".green()
+                },
                 reason
             );
 

@@ -14,7 +14,7 @@
 
 mod debounce;
 
-use debounce::{DEFAULT_THRESHOLD_MS, TARGET_KEYS, run_filter_loop};
+use debounce::{run_filter_loop, DEFAULT_THRESHOLD_MS, TARGET_KEYS};
 use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
     Device,
@@ -25,7 +25,6 @@ use std::{
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
