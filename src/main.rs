@@ -75,12 +75,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .get_key_state()
             .map(|ks| ks.iter().next().is_some())
             .unwrap_or(false);
+        // Drain buffered events unconditionally — including the final iteration
+        // where keys_held is false. The kernel can still have UP events buffered
+        // even after get_key_state() reports all-clear, and those would otherwise
+        // leak into the main filter loop and get re-injected.
+        for _ in real.fetch_events()? {}
         if !keys_held {
             break;
         }
-        // Consume and discard buffered events (DNs, auto-repeats, etc.)
-        // fetch_events() returns immediately when events are queued.
-        for _ in real.fetch_events()? {}
     }
     println!(" done.\nRunning… (Ctrl-C to stop)\n");
     run_filter_loop(&mut real, &mut virt, threshold, log_forward)?;
