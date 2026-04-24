@@ -36,10 +36,10 @@ const TARGET_KEY: Key = Key::KEY_K;
 /// personal test data shows that the bounce range between 6-17.9 ms. setting it to 30ms is much safer
 const DEFAULT_THRESHOLD_MS: u64 = 30;
 
-/// Extended debounce window (3x threshold) used when the previous press was
+/// Extended debounce window used when the previous press was
 /// abnormally short (< 20 ms). This catches the slower bounce mode where a
 /// brief false contact is followed by re-engagement at 33–50 ms later.
-const EXTENDED_THRESHOLD_MULTIPLIER: u64 = 2;
+const EXTENDED_THRESHOLD_MS: u64 = 60;
 
 /// Hold duration threshold to detect a short/bouncy press that should trigger
 /// extended debouncing for the next cycle.
@@ -100,7 +100,7 @@ fn run_filter_loop(
     threshold_ms: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let threshold = Duration::from_millis(threshold_ms);
-    let extended_threshold = Duration::from_millis(threshold_ms * EXTENDED_THRESHOLD_MULTIPLIER);
+    let extended_threshold = Duration::from_millis(EXTENDED_THRESHOLD_MS);
 
     let mut last_forwarded_up: Option<Instant> = None;
     let mut last_dn_at: Option<Instant> = None;   // to measure hold duration
@@ -233,7 +233,7 @@ fn process_event(
                 *last_forwarded_up = Some(now);
 
                 if *last_hold_was_short {
-                    let next_ms = active_threshold_ms * EXTENDED_THRESHOLD_MULTIPLIER as u128;
+                    let next_ms = EXTENDED_THRESHOLD_MS;
                     eprintln!(
                         "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
                     );
