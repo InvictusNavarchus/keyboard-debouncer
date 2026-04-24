@@ -274,19 +274,16 @@ fn apply_decision(
                 reason
             );
 
-            if log_forward {
-                eprintln!("{msg}");
-            } else {
-                state.pending.push(msg);
-            }
-
-            // Update state based on event type
+            // Update state BEFORE buffering the log message. This ensures that
+            // when a new forwarded DN clears the pending context, the new DN's
+            // log message is added *after* the clear, keeping it as context for
+            // the subsequent UP and any following suppress.
             match event.value() {
                 1 => {
                     // Key Down
                     state.last_dn_at = Some(Instant::now());
                     state.suppressed = false;
-                    state.pending.clear(); // New press, clear old pending
+                    state.pending.clear(); // New press, clear old pending context
                 }
                 0 => {
                     // Key Up
@@ -298,6 +295,12 @@ fn apply_decision(
                     state.last_forwarded_up = Some(now);
                 }
                 _ => {} // Auto-repeat: no state update needed
+            }
+
+            if log_forward {
+                eprintln!("{msg}");
+            } else {
+                state.pending.push(msg);
             }
 
             true
