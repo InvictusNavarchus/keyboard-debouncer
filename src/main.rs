@@ -29,7 +29,7 @@ use std::{
 const TARGET_KEY: Key = Key::KEY_K;
 
 /// Default debounce window. Any DN event for TARGET_KEY arriving within this
-/// duration after the *last forwarded* DN is treated as chatter and dropped
+/// duration after the *last forwarded* UP is treated as chatter and dropped
 /// (together with its matching UP).
 ///
 /// From the log analysis: bounce intervals were 7–20 ms, real inter-key gaps
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Core event loop.
 ///
 /// State tracked per-loop (only for TARGET_KEY):
-/// - `last_forwarded_dn`  — Instant of the last DN we actually let through
+/// - `last_forwarded_up`  — Instant of the last UP we actually let through
 /// - `suppressed`         — true while we are inside a suppressed press/release
 ///                          pair (so we can also swallow the matching UP)
 fn run_filter_loop(
@@ -75,7 +75,7 @@ fn run_filter_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let threshold = Duration::from_millis(threshold_ms);
 
-    let mut last_forwarded_dn: Option<Instant> = None;
+    let mut last_forwarded_up: Option<Instant> = None;
     let mut suppressed = false; // are we currently dropping a bounce press?
 
     loop {
@@ -84,7 +84,7 @@ fn run_filter_loop(
             let forward = should_forward(
                 &event,
                 threshold,
-                &mut last_forwarded_dn,
+                &mut last_forwarded_up,
                 &mut suppressed,
             );
 
@@ -100,22 +100,22 @@ fn run_filter_loop(
 /// Returns `true` if the event should be forwarded to the virtual device.
 ///
 /// Logic for TARGET_KEY DN (value == 1):
-///   • If no previous DN was forwarded, let it through and record the time.
-///   • If the gap since the last forwarded DN is ≥ threshold → new legitimate
-///     press: forward it, reset state.
+///   • If no previous UP was forwarded, let it through.
+///   • If the gap since the last forwarded UP is ≥ threshold → new legitimate
+///     press: forward it.
 ///   • If the gap is < threshold → bounce: suppress this DN *and* its UP.
 ///
 /// Logic for TARGET_KEY UP (value == 0):
 ///   • If we just suppressed the matching DN, suppress this UP too (prevents
 ///     a stray "key release" with no matching "key press").
-///   • Otherwise forward normally.
+///   • Otherwise forward normally and record the time.
 ///
 /// Logic for TARGET_KEY repeat (value == 2) and all other keys:
 ///   • Forward unconditionally.
 fn should_forward(
     event: &InputEvent,
     threshold: Duration,
-    last_forwarded_dn: &mut Option<Instant>,
+    last_forwarded_up: &mut Option<Instant>,
     suppressed: &mut bool,
 ) -> bool {
     // Only inspect key events for our target
@@ -127,7 +127,7 @@ fn should_forward(
         // ── Key Down ─────────────────────────────────────────────────────────
         1 => {
             let now = Instant::now();
-            let is_bounce = last_forwarded_dn
+            let is_bounce = last_forwarded_up
                 .map(|t| now.duration_since(t) < threshold)
                 .unwrap_or(false);
 
@@ -135,7 +135,6 @@ fn should_forward(
                 *suppressed = true;
                 false
             } else {
-                *last_forwarded_dn = Some(now);
                 *suppressed = false;
                 true
             }
@@ -148,6 +147,7 @@ fn should_forward(
                 *suppressed = false;
                 false
             } else {
+                *last_forwarded_up = Some(Instant::now());
                 true
             }
         }
