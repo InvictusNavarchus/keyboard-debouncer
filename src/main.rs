@@ -48,12 +48,13 @@ const SHORT_HOLD_THRESHOLD_MS: u64 = 20;
 // ── entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (device_path, threshold) = parse_args()?;
+    let (device_path, threshold, log_forward) = parse_args()?;
 
     println!("kbd-debounce starting");
     println!("  device    : {}", device_path.display());
     println!("  target key: {TARGET_KEY:?}");
     println!("  threshold : {threshold} ms");
+    println!("  log fwd   : {log_forward}");
 
     let mut real = Device::open(&device_path)?;
     println!("  name      : {}", real.name().unwrap_or("(unknown)"));
@@ -82,7 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for _ in real.fetch_events()? {}
     }
     println!(" done.\nRunning… (Ctrl-C to stop)\n");
-    run_filter_loop(&mut real, &mut virt, threshold)?;
+    run_filter_loop(&mut real, &mut virt, threshold, log_forward)?;
     Ok(())
 }
 
@@ -98,6 +99,7 @@ fn run_filter_loop(
     real: &mut Device,
     virt: &mut VirtualDevice,
     threshold_ms: u64,
+    log_forward: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let threshold = Duration::from_millis(threshold_ms);
     let extended_threshold = Duration::from_millis(EXTENDED_THRESHOLD_MS);
@@ -117,6 +119,7 @@ fn run_filter_loop(
                 &mut last_dn_at,
                 &mut suppressed,
                 &mut last_hold_was_short,
+                log_forward,
             );
 
             if forward {
@@ -152,6 +155,7 @@ fn process_event(
     last_dn_at: &mut Option<Instant>,
     suppressed: &mut bool,
     last_hold_was_short: &mut bool,
+    log_forward: bool,
 ) -> bool {
     // Non-target key or repeat: pass through silently.
     if event.kind() != InputEventKind::Key(TARGET_KEY) {
@@ -182,9 +186,11 @@ fn process_event(
                     // First press ever — no reference UP to compare against.
                     *last_dn_at = Some(now);
                     *suppressed = false;
-                    eprintln!(
-                        "[{ts}] ↓ {TARGET_KEY:?}  FORWARD   (first press, no prior UP recorded)"
-                    );
+                    if log_forward {
+                        eprintln!(
+                            "[{ts}] ↓ {TARGET_KEY:?}  FORWARD   (first press, no prior UP recorded)"
+                        );
+                    }
                     true
                 }
                 Some(last_up) => {
@@ -200,9 +206,11 @@ fn process_event(
                     } else {
                         *last_dn_at = Some(now);
                         *suppressed = false;
-                        eprintln!(
-                            "[{ts}] ↓ {TARGET_KEY:?}  FORWARD   gap={gap_ms:.2}ms ≥ {active_threshold_ms}ms ({threshold_label} threshold)"
-                        );
+                        if log_forward {
+                            eprintln!(
+                                "[{ts}] ↓ {TARGET_KEY:?}  FORWARD   gap={gap_ms:.2}ms ≥ {active_threshold_ms}ms ({threshold_label} threshold)"
+                            );
+                        }
                         true
                     }
                 }
@@ -234,13 +242,17 @@ fn process_event(
 
                 if *last_hold_was_short {
                     let next_ms = EXTENDED_THRESHOLD_MS;
-                    eprintln!(
-                        "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
-                    );
+                    if log_forward {
+                        eprintln!(
+                            "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
+                        );
+                    }
                 } else {
-                    eprintln!(
-                        "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}"
-                    );
+                    if log_forward {
+                        eprintln!(
+                            "[{ts}] ↑ {TARGET_KEY:?}  FORWARD   hold={hold_str}"
+                        );
+                    }
                 }
                 true
             }
@@ -273,11 +285,12 @@ fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::err
 
 // ── argument parsing ──────────────────────────────────────────────────────────
 
-fn parse_args() -> Result<(PathBuf, u64), Box<dyn std::error::Error>> {
+fn parse_args() -> Result<(PathBuf, u64, bool), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let mut device_path: Option<PathBuf> = None;
     let mut threshold_ms = DEFAULT_THRESHOLD_MS;
+    let mut log_forward = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -290,12 +303,17 @@ fn parse_args() -> Result<(PathBuf, u64), Box<dyn std::error::Error>> {
                     .parse::<u64>()
                     .map_err(|_| "--threshold-ms value must be a positive integer")?;
             }
+            "--log-forward" | "--verbose" | "-v" => {
+                log_forward = true;
+            }
             "--help" | "-h" => {
                 println!(
-                    "Usage: kbd-debounce <DEVICE_PATH> [--threshold-ms N]\n\
+                    "Usage: kbd-debounce <DEVICE_PATH> [OPTIONS]\n\
                      \n\
-                     DEVICE_PATH      path to keyboard, e.g. /dev/input/event4\n\
-                     --threshold-ms N debounce window in ms (default: {DEFAULT_THRESHOLD_MS})"
+                     Options:\n\
+                     DEVICE_PATH          path to keyboard, e.g. /dev/input/event4\n\
+                     --threshold-ms N     debounce window in ms (default: {DEFAULT_THRESHOLD_MS})\n\
+                     --log-forward, -v    log forwarded events (default is to only log suppressed events)"
                 );
                 std::process::exit(0);
             }
@@ -316,7 +334,7 @@ fn parse_args() -> Result<(PathBuf, u64), Box<dyn std::error::Error>> {
         }
     };
 
-    Ok((path, threshold_ms))
+    Ok((path, threshold_ms, log_forward))
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
