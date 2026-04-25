@@ -9,3 +9,7 @@ A CLI-based tool for Linux to prevent keyboard chatter by intercepting keyboard 
 ## Config
 
 Currently, the list of keys to debounce are hardcoded in the program. You have to modify it at the source code and compile it yourself
+
+## License
+
+This app is licensed under GPLv3
