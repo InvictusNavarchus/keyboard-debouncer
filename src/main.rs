@@ -14,17 +14,13 @@
 
 mod debounce;
 
+use chrono::{Utc, Timelike};
 use debounce::{run_filter_loop, DEFAULT_THRESHOLD_MS, TARGET_KEYS};
 use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
     Device,
 };
-use std::{
-    env,
-    os::unix::io::AsRawFd,
-    path::PathBuf,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{env, os::unix::io::AsRawFd, path::PathBuf, time::Duration};
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
@@ -186,15 +182,14 @@ fn parse_args() -> Result<(PathBuf, u64, bool), Box<dyn std::error::Error>> {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/// Returns a UTC wall-clock timestamp string: `HH:MM:SS.mmm`
+/// Returns a local wall-clock timestamp string: `HH:MM:SS.mmm`
 pub fn fmt_ts() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let total_secs = now.as_secs();
-    let ms = now.subsec_millis();
-    let secs = total_secs % 60;
-    let mins = (total_secs / 60) % 60;
-    let hours = (total_secs / 3600) % 24;
-    format!("{hours:02}:{mins:02}:{secs:02}.{ms:03}")
+    let now: chrono::DateTime<Utc> = Utc::now();
+    format!(
+        "{:02}:{:02}:{:02}.{:03}",
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.timestamp_subsec_millis()
+    )
 }
