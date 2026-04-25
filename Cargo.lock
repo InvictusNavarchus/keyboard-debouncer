@@ -145,7 +145,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kbd-debounce"
+name = "keyboard-debouncer"
 version = "0.1.0"
 dependencies = [
  "chrono",

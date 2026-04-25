@@ -4,7 +4,7 @@ A CLI-based tool for Linux to prevent keyboard chatter by intercepting keyboard 
 
 1. Find the input device node that represents your keyboard using `evtest`
 2. Build the binary with `cargo build --release`
-3. Run the program with `sudo ./target/release/kbd-debounce /dev/input/eventX`, change `eventX` as the event node you've discovered
+3. Run the program with `sudo ./target/release/keyboard-debouncer /dev/input/eventX`, change `eventX` as the event node you've discovered
 
 ## Config
 
