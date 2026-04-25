@@ -25,11 +25,11 @@ pub const DEFAULT_THRESHOLD_MS: u64 = 30;
 /// Extended debounce window used when the previous press was
 /// abnormally short (< 20 ms). This catches the slower bounce mode where a
 /// brief false contact is followed by re-engagement at 33–50 ms later.
-pub const EXTENDED_THRESHOLD_MS: u64 = 60;
+pub const EXTENDED_THRESHOLD_MS: u64 = 100;
 
 /// Hold duration threshold to detect a short/bouncy press that should trigger
 /// extended debouncing for the next cycle.
-const SHORT_HOLD_THRESHOLD_MS: u64 = 20;
+const SHORT_HOLD_THRESHOLD_MS: u64 = 50;
 
 // ── per-key debounce state ────────────────────────────────────────────────────
 
