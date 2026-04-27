@@ -38,25 +38,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut virt = build_virtual_device(&real)?;
 
-    // Grab exclusively — events stop reaching X11/Wayland until re-injected
+    // CRITICAL: wait for all keys to be released BEFORE grabbing the device.
+    //
+    // If we grab first and then drain buffered UP events, X11/Wayland never
+    // sees those UPs and believes the keys (e.g. Enter used to launch this
+    // program) are still held — triggering endless auto-repeat on startup.
+    //
+    // By waiting here, the physical UP events flow through the normal kernel
+    // → X11 path naturally, leaving X11's state clean before we take over.
+    print!("Waiting for all keys to be released…");
+    loop {
+        let keys_held = real
+            .get_key_state()
+            .map(|ks| ks.iter().next().is_some())
+            .unwrap_or(false);
+        if !keys_held {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    println!(" done.");
+
+    // Now safe to grab exclusively — X11 state is clean.
     real.grab()?;
     println!("Device grabbed.");
 
-    // Sleep unconditionally for 200ms after the grab so that all in-flight
-    // kernel events (including the Enter UP that triggered this program) have
-    // time to arrive and settle in the buffer.  Then do a single non-blocking
-    // drain to discard them all before handing off to the filter loop.
-    //
-    // Previous approach (poll + get_key_state) had a race condition: the key
-    // may already read as "released" in hardware state while its UP event is
-    // still sitting in the kernel buffer, causing it to be re-injected on
-    // startup.  A plain sleep is simpler and correct by construction.
-    print!("Flushing startup buffer…");
-    std::thread::sleep(Duration::from_millis(200));
+    // Brief sleep + drain to discard any events that sneaked into the kernel
+    // buffer in the tiny window between the last key-state check and grab().
+    std::thread::sleep(Duration::from_millis(50));
     while events_available(real.as_raw_fd()) {
         for _ in real.fetch_events()? {}
     }
-    println!(" done.\nRunning… (Ctrl-C to stop)\n");
+    println!("Running… (Ctrl-C to stop)\n");
 
     // Hand off to the debounce filter loop
     run_filter_loop(&mut real, &mut virt, threshold, log_forward)?;
