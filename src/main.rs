@@ -42,39 +42,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     real.grab()?;
     println!("Device grabbed.");
 
-    // Drain any events already buffered in the kernel queue before the grab
-    // (e.g. the Enter keypress used to launch this program from a terminal).
-    // Without this, those events are immediately re-injected through the virtual
-    // device causing rapid-fire input on startup.
+    // Sleep unconditionally for 200ms after the grab so that all in-flight
+    // kernel events (including the Enter UP that triggered this program) have
+    // time to arrive and settle in the buffer.  Then do a single non-blocking
+    // drain to discard them all before handing off to the filter loop.
     //
-    // IMPORTANT: fetch_events() blocks when the kernel buffer is empty. We must
-    // guard every call with events_available() (poll timeout=0) so the drain
-    // loop never stalls waiting for input that would leak into run_filter_loop.
-    print!("Waiting for all keys to be released…");
-    loop {
-        let keys_held = real
-            .get_key_state()
-            .map(|ks| ks.iter().next().is_some())
-            .unwrap_or(false);
-
-        // Drain all currently buffered events — non-blocking because we only
-        // call fetch_events() when poll confirms data is ready.
-        while events_available(real.as_raw_fd()) {
-            for _ in real.fetch_events()? {}
-        }
-
-        if !keys_held {
-            // Wait 50 ms for any in-flight UP events to arrive in the kernel
-            // buffer (e.g. the release event for the Enter key used to launch
-            // this program), then do one final drain before handing off.
-            std::thread::sleep(Duration::from_millis(50));
-            while events_available(real.as_raw_fd()) {
-                for _ in real.fetch_events()? {}
-            }
-            break;
-        }
-
-        std::thread::sleep(Duration::from_millis(5)); // avoid busy-spin while held
+    // Previous approach (poll + get_key_state) had a race condition: the key
+    // may already read as "released" in hardware state while its UP event is
+    // still sitting in the kernel buffer, causing it to be re-injected on
+    // startup.  A plain sleep is simpler and correct by construction.
+    print!("Flushing startup buffer…");
+    std::thread::sleep(Duration::from_millis(200));
+    while events_available(real.as_raw_fd()) {
+        for _ in real.fetch_events()? {}
     }
     println!(" done.\nRunning… (Ctrl-C to stop)\n");
 
