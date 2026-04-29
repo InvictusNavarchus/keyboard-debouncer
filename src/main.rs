@@ -116,89 +116,99 @@ fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::err
     Ok(builder.build()?)
 }
 
-// ── argument parsing ──────────────────────────────────────────────────────────
+// ── config parsing ────────────────────────────────────────────────────────────
+
+use std::collections::HashMap;
+
+fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    content
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#') && l.contains('='))
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect()
+}
+
+fn find_device_by_name(target_name: &str) -> Option<PathBuf> {
+    for (path, device) in evdev::enumerate() {
+        if let Some(name) = device.name() {
+            if name.trim() == target_name {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
 
 fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, bool), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-
-    let mut device_path: Option<PathBuf> = None;
-    let mut target_keys: Option<Vec<Key>> = None;
-    let mut threshold_ms = DEFAULT_THRESHOLD_MS;
-    let mut log_forward = false;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--keys" => {
-                i += 1;
-                let raw = args.get(i).ok_or("--keys requires a value (e.g. --keys KEY_K,KEY_L)")?;
-                let mut parsed: Vec<Key> = Vec::new();
-                for name in raw.split(',') {
-                    let name = name.trim();
-                    parsed.push(
-                        name.parse::<Key>()
-                            .map_err(|_| format!("Unknown key name: '{name}'. Use evtest format, e.g. KEY_K, KEY_ENTER"))?,
-                    );
-                }
-                if parsed.is_empty() {
-                    return Err("--keys value must not be empty".into());
-                }
-                target_keys = Some(parsed);
-            }
-            "--threshold-ms" => {
-                i += 1;
-                threshold_ms = args
-                    .get(i)
-                    .ok_or("--threshold-ms requires a value")?
-                    .parse::<u64>()
-                    .map_err(|_| "--threshold-ms value must be a positive integer")?;
-            }
-            "--log-forward" | "--verbose" | "-v" => {
-                log_forward = true;
-            }
-            "--help" | "-h" => {
-                println!(
-                    "Usage: kbd-debounce <DEVICE_PATH> --keys KEY_A,KEY_B [OPTIONS]\n\
-                     \n\
-                     Options:\n\
-                     DEVICE_PATH          path to keyboard, e.g. /dev/input/event4\n\
-                     --keys KEY_A,KEY_B   comma-separated keys to debounce (required;\n\
-                                          use KEY_* names as shown by evtest, e.g. KEY_K,KEY_ENTER)\n\
-                     --threshold-ms N     debounce window in ms (default: {DEFAULT_THRESHOLD_MS})\n\
-                     --log-forward, -v    log forwarded events immediately (default: forward logs\n\
-                                          shown only when followed by a suppress for context)"
-                );
-                std::process::exit(0);
-            }
-            path if path.starts_with('/') => {
-                device_path = Some(PathBuf::from(path));
-            }
-            other => {
-                return Err(format!("Unknown argument: {other}").into());
-            }
+    let mut args = env::args();
+    let conf_path = if let Some(arg) = args.nth(1) {
+        if arg == "--help" || arg == "-h" {
+            println!(
+                "Usage: kbd-debounce [CONFIG_PATH]\n\
+                 \n\
+                 If no config path is provided, looks for `debouncer.conf` in the current directory, \n\
+                 or `/etc/debouncer.conf`."
+            );
+            std::process::exit(0);
         }
-        i += 1;
+        PathBuf::from(arg)
+    } else {
+        let local = PathBuf::from("debouncer.conf");
+        let etc = PathBuf::from("/etc/debouncer.conf");
+        if local.exists() {
+            local
+        } else if etc.exists() {
+            etc
+        } else {
+            return Err(
+                "Could not find debouncer.conf in current directory or /etc/. Please create one."
+                    .into(),
+            );
+        }
+    };
+
+    let conf = load_conf(&conf_path);
+
+    let keys_raw = conf
+        .get("KEYS")
+        .ok_or(format!("KEYS is required in {}", conf_path.display()))?;
+    let mut target_keys: Vec<Key> = Vec::new();
+    for name in keys_raw.split(',') {
+        let name = name.trim();
+        target_keys.push(name.parse::<Key>().map_err(|_| {
+            format!("Unknown key name: '{name}'. Use evtest format, e.g. KEY_K, KEY_ENTER")
+        })?);
+    }
+    if target_keys.is_empty() {
+        return Err("KEYS value must not be empty".into());
     }
 
-    let path = match device_path {
-        Some(p) => p,
-        None => {
-            return Err(
-                "Error: DEVICE_PATH is required. Run `kbd-debounce --help` for usage.".into(),
-            );
-        }
+    let threshold_ms = conf
+        .get("THRESHOLD_MS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_THRESHOLD_MS);
+
+    let log_forward = conf
+        .get("LOG_FORWARD")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    let device_path = if let Some(path_str) = conf.get("DEVICE_PATH") {
+        PathBuf::from(path_str)
+    } else if let Some(name) = conf.get("KEYBOARD_NAME") {
+        find_device_by_name(name)
+            .ok_or_else(|| format!("No input device found with name '{}'", name))?
+    } else {
+        return Err("Either DEVICE_PATH or KEYBOARD_NAME must be set in config".into());
     };
 
-    let keys = match target_keys {
-        Some(k) => k,
-        None => {
-            return Err(
-                "Error: --keys is required. Specify which keys to debounce, e.g. --keys KEY_K,KEY_L".into(),
-            );
-        }
-    };
+    if !device_path.exists() {
+        return Err(format!("Device path {} does not exist", device_path.display()).into());
+    }
 
-    Ok((path, keys, threshold_ms, log_forward))
+    Ok((device_path, target_keys, threshold_ms, log_forward))
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

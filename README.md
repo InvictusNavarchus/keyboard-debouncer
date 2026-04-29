@@ -6,7 +6,7 @@ A CLI daemon for Linux that prevents keyboard chatter by intercepting events at 
 2. Build the binary: `cargo build --release`
 3. Copy the example config: `cp debouncer.conf.example debouncer.conf`
 4. Edit `debouncer.conf` — set at minimum `KEYBOARD_NAME` (or `DEVICE_PATH`) and `KEYS`
-5. Launch: `./launch_debouncer.sh`
+5. Launch: `sudo ./target/release/keyboard-debouncer`
 
 ## Config (`debouncer.conf`)
 

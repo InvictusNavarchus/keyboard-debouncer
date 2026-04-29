@@ -122,10 +122,8 @@ pub fn run_filter_loop(
     let extended_threshold = Duration::from_millis(EXTENDED_THRESHOLD_MS);
 
     // Initialise independent debounce state for every target key.
-    let mut key_states: HashMap<Key, PerKeyState> = keys
-        .iter()
-        .map(|&k| (k, PerKeyState::new()))
-        .collect();
+    let mut key_states: HashMap<Key, PerKeyState> =
+        keys.iter().map(|&k| (k, PerKeyState::new())).collect();
 
     loop {
         for event in real.fetch_events()? {
