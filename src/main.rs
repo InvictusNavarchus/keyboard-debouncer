@@ -15,21 +15,21 @@
 mod debounce;
 
 use chrono::{Local, Timelike};
-use debounce::{run_filter_loop, DEFAULT_THRESHOLD_MS, TARGET_KEYS};
+use debounce::{run_filter_loop, DEFAULT_THRESHOLD_MS};
 use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
-    Device,
+    Device, Key,
 };
 use std::{env, os::unix::io::AsRawFd, path::PathBuf, time::Duration};
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (device_path, threshold, log_forward) = parse_args()?;
+    let (device_path, keys, threshold, log_forward) = parse_args()?;
 
     println!("kbd-debounce starting");
     println!("  device    : {}", device_path.display());
-    println!("  target keys: {TARGET_KEYS:?}");
+    println!("  target keys: {keys:?}");
     println!("  threshold : {threshold} ms");
     println!("  log fwd   : {log_forward}");
 
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running… (Ctrl-C to stop)\n");
 
     // Hand off to the debounce filter loop
-    run_filter_loop(&mut real, &mut virt, threshold, log_forward)?;
+    run_filter_loop(&mut real, &mut virt, &keys, threshold, log_forward)?;
     Ok(())
 }
 
@@ -118,16 +118,33 @@ fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::err
 
 // ── argument parsing ──────────────────────────────────────────────────────────
 
-fn parse_args() -> Result<(PathBuf, u64, bool), Box<dyn std::error::Error>> {
+fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, bool), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let mut device_path: Option<PathBuf> = None;
+    let mut target_keys: Option<Vec<Key>> = None;
     let mut threshold_ms = DEFAULT_THRESHOLD_MS;
     let mut log_forward = false;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--keys" => {
+                i += 1;
+                let raw = args.get(i).ok_or("--keys requires a value (e.g. --keys KEY_K,KEY_L)")?;
+                let mut parsed: Vec<Key> = Vec::new();
+                for name in raw.split(',') {
+                    let name = name.trim();
+                    parsed.push(
+                        name.parse::<Key>()
+                            .map_err(|_| format!("Unknown key name: '{name}'. Use evtest format, e.g. KEY_K, KEY_ENTER"))?,
+                    );
+                }
+                if parsed.is_empty() {
+                    return Err("--keys value must not be empty".into());
+                }
+                target_keys = Some(parsed);
+            }
             "--threshold-ms" => {
                 i += 1;
                 threshold_ms = args
@@ -141,10 +158,12 @@ fn parse_args() -> Result<(PathBuf, u64, bool), Box<dyn std::error::Error>> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: kbd-debounce <DEVICE_PATH> [OPTIONS]\n\
+                    "Usage: kbd-debounce <DEVICE_PATH> --keys KEY_A,KEY_B [OPTIONS]\n\
                      \n\
                      Options:\n\
                      DEVICE_PATH          path to keyboard, e.g. /dev/input/event4\n\
+                     --keys KEY_A,KEY_B   comma-separated keys to debounce (required;\n\
+                                          use KEY_* names as shown by evtest, e.g. KEY_K,KEY_ENTER)\n\
                      --threshold-ms N     debounce window in ms (default: {DEFAULT_THRESHOLD_MS})\n\
                      --log-forward, -v    log forwarded events immediately (default: forward logs\n\
                                           shown only when followed by a suppress for context)"
@@ -170,7 +189,16 @@ fn parse_args() -> Result<(PathBuf, u64, bool), Box<dyn std::error::Error>> {
         }
     };
 
-    Ok((path, threshold_ms, log_forward))
+    let keys = match target_keys {
+        Some(k) => k,
+        None => {
+            return Err(
+                "Error: --keys is required. Specify which keys to debounce, e.g. --keys KEY_K,KEY_L".into(),
+            );
+        }
+    };
+
+    Ok((path, keys, threshold_ms, log_forward))
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

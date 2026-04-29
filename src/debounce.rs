@@ -10,9 +10,6 @@ use colored::Colorize;
 
 // ── configuration ────────────────────────────────────────────────────────────
 
-/// Keys to debounce. Add or remove entries as needed.
-pub const TARGET_KEYS: &[Key] = &[Key::KEY_K, Key::KEY_L];
-
 /// Default debounce window. Any DN event for a TARGET_KEY arriving within this
 /// duration after the *last forwarded* UP is treated as chatter and dropped
 /// (together with its matching UP).
@@ -117,6 +114,7 @@ fn fmt_hold(last_dn_at: Option<Instant>) -> (Option<Duration>, String) {
 pub fn run_filter_loop(
     real: &mut Device,
     virt: &mut VirtualDevice,
+    keys: &[Key],
     threshold_ms: u64,
     log_forward: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -124,7 +122,7 @@ pub fn run_filter_loop(
     let extended_threshold = Duration::from_millis(EXTENDED_THRESHOLD_MS);
 
     // Initialise independent debounce state for every target key.
-    let mut key_states: HashMap<Key, PerKeyState> = TARGET_KEYS
+    let mut key_states: HashMap<Key, PerKeyState> = keys
         .iter()
         .map(|&k| (k, PerKeyState::new()))
         .collect();

@@ -1,1 +1,20 @@
+# Keyboard debouncer configuration
+# Copy this file to debouncer.conf and fill in your values.
+# Run `evtest` to find your keyboard name and the KEY_* names of keys to debounce.
+
+# Physical keyboard name as reported by the kernel (from evtest or /sys/class/input).
+# REQUIRED.
 KEYBOARD_NAME=your-keyboard-name-in-evtest
+
+# Keys to debounce — comma-separated, using KEY_* names exactly as shown by evtest.
+# REQUIRED: the program refuses to start without this.
+# Example: KEYS=KEY_K,KEY_L,KEY_ENTER
+KEYS=KEY_K,KEY_L
+
+# Debounce window in milliseconds.
+# Default: 30. Any re-press within this window after the last release is suppressed.
+THRESHOLD_MS=30
+
+# Set to true to log every forwarded event immediately.
+# Default: false (forwarded events are only shown when followed by a suppressed one, for context).
+LOG_FORWARD=false
