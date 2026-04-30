@@ -16,40 +16,12 @@ use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
     Device,
 };
-use std::{io, os::unix::io::AsRawFd, time::Duration};
-
-// ── access check ──────────────────────────────────────────────────────────────
-
-/// Check if we can read from the input device. If permission is denied, provide
-/// helpful guidance on how to fix it.
-fn ensure_input_access(device_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Attempt to open the device for reading — if it fails with EACCES/EPERM,
-    // give a targeted error message rather than a generic "run as root" one.
-    std::fs::File::open(device_path).map_err(|e| {
-        if e.kind() == io::ErrorKind::PermissionDenied {
-            format!(
-                "Permission denied: cannot open '{}'.\n\
-                 Options:\n\
-                   1. Run as root:             sudo kbd-debounce [args]\n\
-                   2. Add yourself to input group: sudo usermod -aG input $USER\n\
-                   3. Set a udev rule for this device",
-                device_path.display()
-            )
-            .into()
-        } else {
-            Box::new(e) as Box<dyn std::error::Error>
-        }
-    })?;
-    Ok(())
-}
+use std::{os::unix::io::AsRawFd, time::Duration};
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (device_path, keys, threshold, extended_threshold, short_hold_threshold, log_forward) = config::parse_args()?;
-
-    // Check if we have permission to access the device
-    ensure_input_access(&device_path)?;
 
     println!("kbd-debounce starting");
     println!("  device    : {}", device_path.display());

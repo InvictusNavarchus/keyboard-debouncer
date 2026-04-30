@@ -1,7 +1,7 @@
 use crate::debounce::{DEFAULT_EXTENDED_THRESHOLD_MS, DEFAULT_SHORT_HOLD_THRESHOLD_MS, DEFAULT_THRESHOLD_MS};
 use evdev::Key;
 use std::collections::HashMap;
-use std::{env, path::PathBuf};
+use std::{env, io, path::PathBuf};
 
 fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
     let content = std::fs::read_to_string(path).unwrap_or_default();
@@ -13,15 +13,57 @@ fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
         .collect()
 }
 
-fn find_device_by_name(target_name: &str) -> Option<PathBuf> {
-    for (path, device) in evdev::enumerate() {
-        if let Some(name) = device.name() {
-            if name.trim() == target_name {
-                return Some(path);
+fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let mut permission_denied_count = 0usize;
+
+    for entry in std::fs::read_dir("/dev/input")? {
+        let path = entry?.path();
+
+        // Only consider event nodes
+        let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !fname.starts_with("event") {
+            continue;
+        }
+
+        match evdev::Device::open(&path) {
+            Ok(device) => {
+                if device.name().map(str::trim) == Some(target_name) {
+                    return Ok(path);
+                }
             }
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                permission_denied_count += 1;
+            }
+            Err(_) => {} // Unreadable for other reasons (e.g. not an event device), skip
         }
     }
-    None
+
+    if permission_denied_count > 0 {
+        Err(format!(
+            "Device '{target_name}' not found — {permission_denied_count} input device(s) \
+             were unreadable due to permissions.\n\
+             \n\
+             Fix (recommended, no root needed after setup):\n\
+               sudo usermod -aG input $USER   # then log out and back in\n\
+             \n\
+             Or add a udev rule:\n\
+               echo 'SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"0660\"' \
+             | sudo tee /etc/udev/rules.d/99-kbd-debounce.rules\n\
+               sudo udevadm control --reload && sudo udevadm trigger\n\
+             \n\
+             Or run once as root:\n\
+               sudo kbd-debounce [config]"
+        )
+        .into())
+    } else {
+        Err(format!(
+            "No input device found with name '{target_name}'.\n\
+             Check available devices with: sudo libinput list-devices"
+        )
+        .into())
+    }
 }
 
 pub fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool), Box<dyn std::error::Error>> {
@@ -91,8 +133,7 @@ pub fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool), Box<dyn 
     let device_path = if let Some(path_str) = conf.get("DEVICE_PATH") {
         PathBuf::from(path_str)
     } else if let Some(name) = conf.get("KEYBOARD_NAME") {
-        find_device_by_name(name)
-            .ok_or_else(|| format!("No input device found with name '{}'", name))?
+        find_device_by_name(name)?
     } else {
         return Err("Either DEVICE_PATH or KEYBOARD_NAME must be set in config".into());
     };
