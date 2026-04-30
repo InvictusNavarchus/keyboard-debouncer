@@ -28,7 +28,8 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let (device_path, keys, threshold, extended_threshold, short_hold_threshold, log_forward) = config::parse_args()?;
+    let (device_path, keys, threshold, extended_threshold, short_hold_threshold, log_forward) =
+        config::parse_args()?;
 
     println!("kbd-debounce starting");
     println!("  device    : {}", device_path.display());

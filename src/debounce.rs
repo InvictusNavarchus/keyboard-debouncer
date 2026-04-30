@@ -152,7 +152,14 @@ pub fn run_filter_loop(
             );
 
             let ts = crate::fmt_ts();
-            let forward = apply_decision(decision, &event, state, &ts, log_forward, short_hold_threshold);
+            let forward = apply_decision(
+                decision,
+                &event,
+                state,
+                &ts,
+                log_forward,
+                short_hold_threshold,
+            );
 
             if forward {
                 virt.emit(&[event])?;
@@ -238,10 +245,7 @@ fn process_event(
                 }
             } else {
                 let (hold, hold_str) = fmt_hold(state.last_dn_at);
-                let reason = if hold
-                    .map(|h| h < short_hold_threshold)
-                    .unwrap_or(false)
-                {
+                let reason = if hold.map(|h| h < short_hold_threshold).unwrap_or(false) {
                     let next_ms = extended_threshold.as_millis();
                     format!(
                         "{key:?}  hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
@@ -297,9 +301,8 @@ fn apply_decision(
                     // Key Up
                     let now = Instant::now();
                     let hold = state.last_dn_at.map(|t| now.duration_since(t));
-                    state.last_hold_was_short = hold
-                        .map(|h| h < short_hold_threshold)
-                        .unwrap_or(false);
+                    state.last_hold_was_short =
+                        hold.map(|h| h < short_hold_threshold).unwrap_or(false);
                     state.last_forwarded_up = Some(now);
                 }
                 _ => {} // Auto-repeat: no state update needed
