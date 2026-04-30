@@ -145,17 +145,7 @@ pub fn parse_args(
         return Err(format!("Device path {} does not exist", device_path.display()).into());
     }
 
-    let track_db = conf.get("TRACK_DB").map(|s| {
-        let path_str = s.as_str();
-        if path_str.starts_with("~/") {
-            if let Some(home) = std::env::var_os("HOME") {
-                let mut pb = PathBuf::from(home);
-                pb.push(&path_str[2..]);
-                return pb;
-            }
-        }
-        PathBuf::from(path_str)
-    });
+    let track_db = conf.get("TRACK_DB").map(PathBuf::from);
 
     Ok((
         device_path,

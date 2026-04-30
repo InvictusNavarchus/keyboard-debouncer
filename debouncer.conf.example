@@ -37,5 +37,5 @@ LOG_FORWARD=false
 # When set, the debouncer passively records every keypress (including non-target keys)
 # to help identify defective hardware before you know to debounce it.
 # Data stays local. Ensure you restrict file permissions appropriately (e.g. chmod 600).
-# Example: TRACK_DB=~/.local/share/keyboard-debouncer/keys.db
-# TRACK_DB=~/.local/share/keyboard-debouncer/keys.db
+# Example: TRACK_DB=/var/lib/keyboard-debouncer/keys.db
+# TRACK_DB=/var/lib/keyboard-debouncer/keys.db
