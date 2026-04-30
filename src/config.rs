@@ -52,11 +52,11 @@ fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error:
              \n\
              Or add a udev rule:\n\
                echo 'SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"0660\"' \
-             | sudo tee /etc/udev/rules.d/99-kbd-debounce.rules\n\
+             | sudo tee /etc/udev/rules.d/99-keyboard-debouncer.rules\n\
                sudo udevadm control --reload && sudo udevadm trigger\n\
              \n\
              Or run once as root:\n\
-               sudo kbd-debounce [config]"
+               sudo keyboard-debouncer [config]"
         )
         .into())
     } else {
@@ -74,7 +74,7 @@ pub fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool), Box<dyn 
     let conf_path = if let Some(arg) = args.nth(1) {
         if arg == "--help" || arg == "-h" {
             println!(
-                "Usage: kbd-debounce [CONFIG_PATH]\n\
+                "Usage: keyboard-debouncer [CONFIG_PATH]\n\
                  \n\
                  If no config path is provided, looks for `debouncer.conf` in the current directory, \n\
                  or `/etc/debouncer.conf`."

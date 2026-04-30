@@ -1,4 +1,4 @@
-//! kbd-debounce — system-level key chatter filter for Linux (evdev/uinput)
+//! keyboard-debouncer — system-level key chatter filter for Linux (evdev/uinput)
 //!
 //! Grabs a physical keyboard device exclusively, debounces a target key,
 //! then re-injects clean events via a virtual uinput device.
@@ -31,7 +31,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (device_path, keys, threshold, extended_threshold, short_hold_threshold, log_forward) =
         config::parse_args()?;
 
-    println!("kbd-debounce starting");
+    println!("keyboard-debouncer starting");
     println!("  device    : {}", device_path.display());
     println!("  target keys: {keys:?}");
     println!("  threshold : {threshold} ms");
@@ -115,7 +115,7 @@ fn events_available(fd: std::os::unix::io::RawFd) -> bool {
 /// We mirror keys, LEDs, and misc event types so the virtual keyboard is
 /// indistinguishable from the physical one to applications.
 fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::error::Error>> {
-    let mut builder = VirtualDeviceBuilder::new()?.name("kbd-debounce");
+    let mut builder = VirtualDeviceBuilder::new()?.name("keyboard-debouncer");
 
     // Mirror supported keys (required; without this typing does nothing)
     if let Some(keys) = real.supported_keys() {
