@@ -20,7 +20,14 @@ use std::{os::unix::io::AsRawFd, time::Duration};
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (device_path, keys, threshold, extended_threshold, short_hold_threshold, log_forward) = config::parse_args()?;
 
     println!("kbd-debounce starting");
