@@ -21,6 +21,11 @@ use std::{os::unix::io::AsRawFd, time::Duration};
 // ── entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Require root to access /dev/input devices
+    if unsafe { libc::geteuid() } != 0 {
+        return Err("This program must be run as root".into());
+    }
+
     let (device_path, keys, threshold, extended_threshold, short_hold_threshold, log_forward) = config::parse_args()?;
 
     println!("kbd-debounce starting");
