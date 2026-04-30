@@ -119,6 +119,7 @@ pub fn run_filter_loop(
     extended_threshold_ms: u64,
     short_hold_threshold_ms: u64,
     log_forward: bool,
+    tracker: &crate::tracker::Tracker,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let threshold = Duration::from_millis(threshold_ms);
     let extended_threshold = Duration::from_millis(extended_threshold_ms);
@@ -132,13 +133,19 @@ pub fn run_filter_loop(
         for event in real.fetch_events()? {
             // Determine whether this event belongs to one of the target keys.
             // Non-target keys are forwarded immediately without touching any state.
-            let target_key = match event.kind() {
-                evdev::InputEventKind::Key(k) if key_states.contains_key(&k) => k,
+            let (target_key, is_target) = match event.kind() {
+                evdev::InputEventKind::Key(k) => (k, key_states.contains_key(&k)),
                 _ => {
                     virt.emit(&[event])?;
                     continue;
                 }
             };
+
+            if !is_target {
+                tracker.track(target_key, event.value(), false);
+                virt.emit(&[event])?;
+                continue;
+            }
 
             let state = key_states.get_mut(&target_key).unwrap();
 
@@ -160,6 +167,8 @@ pub fn run_filter_loop(
                 log_forward,
                 short_hold_threshold,
             );
+
+            tracker.track(target_key, event.value(), !forward);
 
             if forward {
                 virt.emit(&[event])?;

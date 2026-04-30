@@ -68,8 +68,8 @@ fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error:
     }
 }
 
-pub fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool), Box<dyn std::error::Error>>
-{
+pub fn parse_args(
+) -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool, Option<PathBuf>), Box<dyn std::error::Error>> {
     let mut args = env::args();
     let conf_path = if let Some(arg) = args.nth(1) {
         if arg == "--help" || arg == "-h" {
@@ -145,6 +145,18 @@ pub fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool), Box<dyn 
         return Err(format!("Device path {} does not exist", device_path.display()).into());
     }
 
+    let track_db = conf.get("TRACK_DB").map(|s| {
+        let path_str = s.as_str();
+        if path_str.starts_with("~/") {
+            if let Some(home) = std::env::var_os("HOME") {
+                let mut pb = PathBuf::from(home);
+                pb.push(&path_str[2..]);
+                return pb;
+            }
+        }
+        PathBuf::from(path_str)
+    });
+
     Ok((
         device_path,
         target_keys,
@@ -152,5 +164,6 @@ pub fn parse_args() -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool), Box<dyn 
         extended_threshold_ms,
         short_hold_threshold_ms,
         log_forward,
+        track_db,
     ))
 }

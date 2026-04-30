@@ -32,3 +32,10 @@ SHORT_HOLD_THRESHOLD_MS=50
 # Set to true to log every forwarded event immediately.
 # Default: false (forwarded events are only shown when followed by a suppressed one, for context).
 LOG_FORWARD=false
+
+# Enable key health tracking by setting a path to an SQLite database.
+# When set, the debouncer passively records every keypress (including non-target keys)
+# to help identify defective hardware before you know to debounce it.
+# Data stays local. Ensure you restrict file permissions appropriately (e.g. chmod 600).
+# Example: TRACK_DB=~/.local/share/keyboard-debouncer/keys.db
+# TRACK_DB=~/.local/share/keyboard-debouncer/keys.db
