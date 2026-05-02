@@ -40,7 +40,11 @@ impl Tracker {
             let mut conn = match Connection::open(&path) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Tracker: Failed to open database at {}: {}", path.display(), e);
+                    eprintln!(
+                        "Tracker: Failed to open database at {}: {}",
+                        path.display(),
+                        e
+                    );
                     return;
                 }
             };
