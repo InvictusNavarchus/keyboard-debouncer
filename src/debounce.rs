@@ -108,9 +108,9 @@ fn fmt_hold(last_dn_at: Option<Instant>) -> (Option<Duration>, String) {
 /// State tracked per-loop (only for TARGET_KEYS):
 /// - `last_up`             — Instant of the last UP (forwarded or suppressed)
 /// - `suppressed`         — true while we are inside a suppressed press/release
-///                          pair (so we can also swallow the matching UP)
+///   pair (so we can also swallow the matching UP)
 /// - `pending`            — buffered forward log messages, emitted only when a
-///                          subsequent suppress provides context
+///   subsequent suppress provides context
 ///
 /// Each target key has its own independent `PerKeyState` stored in a HashMap.
 pub fn run_filter_loop(
