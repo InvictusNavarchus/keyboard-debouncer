@@ -81,65 +81,56 @@ impl Tracker {
             // Read from channel and insert in batches
             let mut buffer = Vec::with_capacity(100);
 
-            loop {
-                // Wait for at least one event
-                match rx.recv() {
-                    Ok(event) => {
-                        buffer.push(event);
+            while let Ok(event) = rx.recv() {
+                buffer.push(event);
 
-                        // Drain remaining events up to a reasonable batch size
-                        while buffer.len() < 1000 {
-                            match rx.try_recv() {
-                                Ok(ev) => buffer.push(ev),
-                                Err(_) => break,
-                            }
-                        }
-
-                        let tx_conn = match conn.transaction() {
-                            Ok(tx) => tx,
-                            Err(e) => {
-                                eprintln!("Tracker: Failed to start transaction: {}", e);
-                                buffer.clear();
-                                continue;
-                            }
-                        };
-
-                        let mut success = true;
-                        {
-                            if let Ok(mut stmt) = tx_conn.prepare_cached(
-                                "INSERT INTO key_events (ts_ms, key, value, suppressed) VALUES (?1, ?2, ?3, ?4)"
-                            ) {
-                                for ev in &buffer {
-                                    if let Err(e) = stmt.execute(params![
-                                        ev.ts_ms as i64,
-                                        format!("{:?}", ev.key),
-                                        ev.value,
-                                        if ev.suppressed { 1 } else { 0 }
-                                    ]) {
-                                        eprintln!("Tracker: Failed to insert event: {}", e);
-                                        success = false;
-                                        break;
-                                    }
-                                }
-                            } else {
-                                eprintln!("Tracker: Failed to prepare statement");
-                                success = false;
-                            }
-                        }
-
-                        if success {
-                            if let Err(e) = tx_conn.commit() {
-                                eprintln!("Tracker: Failed to commit transaction: {}", e);
-                            }
-                        }
-
-                        buffer.clear();
-                    }
-                    Err(_) => {
-                        // Channel closed (main thread exited)
-                        break;
+                // Drain remaining events up to a reasonable batch size
+                while buffer.len() < 1000 {
+                    match rx.try_recv() {
+                        Ok(ev) => buffer.push(ev),
+                        Err(_) => break,
                     }
                 }
+
+                let tx_conn = match conn.transaction() {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        eprintln!("Tracker: Failed to start transaction: {}", e);
+                        buffer.clear();
+                        continue;
+                    }
+                };
+
+                let mut success = true;
+                {
+                    if let Ok(mut stmt) = tx_conn.prepare_cached(
+                        "INSERT INTO key_events (ts_ms, key, value, suppressed) VALUES (?1, ?2, ?3, ?4)"
+                    ) {
+                        for ev in &buffer {
+                            if let Err(e) = stmt.execute(params![
+                                ev.ts_ms as i64,
+                                format!("{:?}", ev.key),
+                                ev.value,
+                                if ev.suppressed { 1 } else { 0 }
+                            ]) {
+                                eprintln!("Tracker: Failed to insert event: {}", e);
+                                success = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        eprintln!("Tracker: Failed to prepare statement");
+                        success = false;
+                    }
+                }
+
+                if success {
+                    if let Err(e) = tx_conn.commit() {
+                        eprintln!("Tracker: Failed to commit transaction: {}", e);
+                    }
+                }
+
+                buffer.clear();
             }
         });
 
