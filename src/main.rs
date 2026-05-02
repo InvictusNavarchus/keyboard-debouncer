@@ -148,8 +148,8 @@ fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::err
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /// Returns a local wall-clock timestamp string: `HH:MM:SS.mmm`
-pub fn fmt_ts() -> String {
-    let now: chrono::DateTime<Local> = Local::now();
+pub fn fmt_ts_from(now: std::time::SystemTime) -> String {
+    let now: chrono::DateTime<Local> = now.into();
     format!(
         "{:02}:{:02}:{:02}.{:03}",
         now.hour(),

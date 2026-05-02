@@ -146,9 +146,9 @@ impl Tracker {
         Self { sender: Some(tx) }
     }
 
-    pub fn track(&self, key: Key, value: i32, suppressed: bool) {
+    pub fn track(&self, key: Key, value: i32, suppressed: bool, now: SystemTime) {
         if let Some(sender) = &self.sender {
-            let ts_ms = SystemTime::now()
+            let ts_ms = now
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);

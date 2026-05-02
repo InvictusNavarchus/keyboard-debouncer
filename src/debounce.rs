@@ -144,7 +144,12 @@ pub fn run_filter_loop(
             };
 
             if !is_target {
-                tracker.track(target_key, event.value(), false);
+                tracker.track(
+                    target_key,
+                    event.value(),
+                    false,
+                    std::time::SystemTime::now(),
+                );
                 virt.emit(&[event])?;
                 continue;
             }
@@ -160,7 +165,8 @@ pub fn run_filter_loop(
                 state,
             );
 
-            let ts = crate::fmt_ts();
+            let now = std::time::SystemTime::now();
+            let ts = crate::fmt_ts_from(now);
             let forward = apply_decision(
                 decision,
                 &event,
@@ -170,7 +176,7 @@ pub fn run_filter_loop(
                 short_hold_threshold,
             );
 
-            tracker.track(target_key, event.value(), !forward);
+            tracker.track(target_key, event.value(), !forward, now);
 
             if forward {
                 virt.emit(&[event])?;
