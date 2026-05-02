@@ -42,8 +42,10 @@ enum EventDecision {
 /// target key.  One instance lives in the `HashMap<Key, PerKeyState>` that is
 /// initialised in `run_filter_loop`.
 pub struct PerKeyState {
-    /// Instant of the last UP we actually let through (for gap measurement).
-    last_forwarded_up: Option<Instant>,
+    /// Instant of the last UP event (forwarded OR suppressed) for gap measurement.
+    /// Updated on every UP — forwarded and suppressed — because physically the key
+    /// released at that moment regardless of our forwarding decision.
+    last_up: Option<Instant>,
     /// Instant of the last DN we forwarded (to measure hold duration).
     last_dn_at: Option<Instant>,
     /// true while we are inside a suppressed press/release pair (so we can
@@ -60,7 +62,7 @@ pub struct PerKeyState {
 impl PerKeyState {
     pub fn new() -> Self {
         Self {
-            last_forwarded_up: None,
+            last_up: None,
             last_dn_at: None,
             suppressed: false,
             last_hold_was_short: false,
@@ -104,7 +106,7 @@ fn fmt_hold(last_dn_at: Option<Instant>) -> (Option<Duration>, String) {
 /// Core event loop.
 ///
 /// State tracked per-loop (only for TARGET_KEYS):
-/// - `last_forwarded_up`  — Instant of the last UP we actually let through
+/// - `last_up`             — Instant of the last UP (forwarded or suppressed)
 /// - `suppressed`         — true while we are inside a suppressed press/release
 ///                          pair (so we can also swallow the matching UP)
 /// - `pending`            — buffered forward log messages, emitted only when a
@@ -217,7 +219,7 @@ fn process_event(
 
     match event.value() {
         // ── Key Down ─────────────────────────────────────────────────────────
-        1 => match state.last_forwarded_up {
+        1 => match state.last_up {
             None => {
                 // First press ever — no reference UP to compare against.
                 EventDecision::Forward {
@@ -312,7 +314,7 @@ fn apply_decision(
                     let hold = state.last_dn_at.map(|t| now.duration_since(t));
                     state.last_hold_was_short =
                         hold.map(|h| h < short_hold_threshold).unwrap_or(false);
-                    state.last_forwarded_up = Some(now);
+                    state.last_up = Some(now);
                 }
                 _ => {} // Auto-repeat: no state update needed
             }
@@ -362,6 +364,12 @@ fn apply_decision(
                     // keeping the extended threshold armed for as long as the switch
                     // keeps producing short legitimate holds.
                     state.suppressed = false;
+                    // Update last_up so the next DN gap is measured from this
+                    // physical release, not from the original forwarded UP. This
+                    // prevents a chattery bounce's UP from being invisible to gap
+                    // measurement, which could let a subsequent press slip through
+                    // despite being within the threshold.
+                    state.last_up = Some(Instant::now());
                 }
                 _ => {} // Auto-repeat: shouldn't happen
             }
