@@ -19,7 +19,7 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 
 ## How to use
 
-1. **Find your keyboard** using `evtest` (or `sudo libinput list-devices`).
+1. **Find your keyboard** using `evtest`, or `libinput list-devices`, or `grep -r '' /sys/class/input/event*/device/name`
    Note the device name and the `KEY_*` names of the chattering keys.
 2. **Build the binary**: `cargo build --release`
 3. **Copy the example config**:
