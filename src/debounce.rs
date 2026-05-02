@@ -348,9 +348,20 @@ fn apply_decision(
                     state.last_dn_at = Some(Instant::now());
                 }
                 0 => {
-                    // Key Up - end the suppressed pair
+                    // Key Up - end the suppressed pair.
+                    // NOTE: do NOT touch last_hold_was_short here. The flag is a
+                    // property of the last *forwarded* hold being short, not of the
+                    // chatter bounce. Clearing it here is incorrect because:
+                    //   1. Suppressed events can never set it to true — only forwarded
+                    //      UPs can — so clearing it here was a one-way ratchet that
+                    //      always disarmed the extended threshold after one bounce pair.
+                    //   2. The bounce duration is noise; it doesn't tell us whether the
+                    //      hardware has recovered. Only a new legitimate press completing
+                    //      with a normal hold duration is a meaningful signal.
+                    // The flag is cleared only when a forwarded UP has a normal hold,
+                    // keeping the extended threshold armed for as long as the switch
+                    // keeps producing short legitimate holds.
                     state.suppressed = false;
-                    state.last_hold_was_short = false;
                 }
                 _ => {} // Auto-repeat: shouldn't happen
             }
