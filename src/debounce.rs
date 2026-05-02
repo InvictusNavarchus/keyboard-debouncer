@@ -117,15 +117,12 @@ pub fn run_filter_loop(
     real: &mut Device,
     virt: &mut VirtualDevice,
     keys: &[Key],
-    threshold_ms: u64,
-    extended_threshold_ms: u64,
-    short_hold_threshold_ms: u64,
-    log_forward: bool,
+    cfg: &crate::config::DebounceConfig,
     tracker: &crate::tracker::Tracker,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let threshold = Duration::from_millis(threshold_ms);
-    let extended_threshold = Duration::from_millis(extended_threshold_ms);
-    let short_hold_threshold = Duration::from_millis(short_hold_threshold_ms);
+    let threshold = Duration::from_millis(cfg.threshold_ms);
+    let extended_threshold = Duration::from_millis(cfg.extended_threshold_ms);
+    let short_hold_threshold = Duration::from_millis(cfg.short_hold_threshold_ms);
 
     // Initialise independent debounce state for every target key.
     let mut key_states: HashMap<Key, PerKeyState> =
@@ -172,7 +169,7 @@ pub fn run_filter_loop(
                 &event,
                 state,
                 &ts,
-                log_forward,
+                cfg.log_forward,
                 short_hold_threshold,
             );
 

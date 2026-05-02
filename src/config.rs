@@ -5,6 +5,22 @@ use evdev::Key;
 use std::collections::HashMap;
 use std::{env, io, path::PathBuf};
 
+/// Configuration for debounce filtering.
+pub struct DebounceConfig {
+    pub threshold_ms: u64,
+    pub extended_threshold_ms: u64,
+    pub short_hold_threshold_ms: u64,
+    pub log_forward: bool,
+}
+
+/// Top-level application configuration.
+pub struct Config {
+    pub device_path: PathBuf,
+    pub keys: Vec<Key>,
+    pub debounce: DebounceConfig,
+    pub track_db: Option<PathBuf>,
+}
+
 fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
     let content = std::fs::read_to_string(path).unwrap_or_default();
     content
@@ -68,8 +84,7 @@ fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error:
     }
 }
 
-pub fn parse_args(
-) -> Result<(PathBuf, Vec<Key>, u64, u64, u64, bool, Option<PathBuf>), Box<dyn std::error::Error>> {
+pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
     let mut args = env::args();
     let conf_path = if let Some(arg) = args.nth(1) {
         if arg == "--help" || arg == "-h" {
@@ -147,13 +162,15 @@ pub fn parse_args(
 
     let track_db = conf.get("TRACK_DB").map(PathBuf::from);
 
-    Ok((
+    Ok(Config {
         device_path,
-        target_keys,
-        threshold_ms,
-        extended_threshold_ms,
-        short_hold_threshold_ms,
-        log_forward,
+        keys: target_keys,
+        debounce: DebounceConfig {
+            threshold_ms,
+            extended_threshold_ms,
+            short_hold_threshold_ms,
+            log_forward,
+        },
         track_db,
-    ))
+    })
 }

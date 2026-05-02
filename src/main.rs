@@ -29,30 +29,22 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let (
-        device_path,
-        keys,
-        threshold,
-        extended_threshold,
-        short_hold_threshold,
-        log_forward,
-        track_db,
-    ) = config::parse_args()?;
+    let cfg = config::parse_args()?;
 
     println!("keyboard-debouncer starting");
-    println!("  device    : {}", device_path.display());
-    println!("  target keys: {keys:?}");
-    println!("  threshold : {threshold} ms");
-    println!("  ext thres : {extended_threshold} ms");
-    println!("  short hold: {short_hold_threshold} ms");
-    println!("  log fwd   : {log_forward}");
-    if let Some(db) = &track_db {
+    println!("  device    : {}", cfg.device_path.display());
+    println!("  target keys: {:?}", cfg.keys);
+    println!("  threshold : {} ms", cfg.debounce.threshold_ms);
+    println!("  ext thres : {} ms", cfg.debounce.extended_threshold_ms);
+    println!("  short hold: {} ms", cfg.debounce.short_hold_threshold_ms);
+    println!("  log fwd   : {}", cfg.debounce.log_forward);
+    if let Some(db) = &cfg.track_db {
         println!("  tracker   : {}", db.display());
     } else {
         println!("  tracker   : (disabled)");
     }
 
-    let mut real = Device::open(&device_path)?;
+    let mut real = Device::open(&cfg.device_path)?;
     println!("  name      : {}", real.name().unwrap_or("(unknown)"));
 
     let mut virt = build_virtual_device(&real)?;
@@ -91,17 +83,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running… (Ctrl-C to stop)\n");
 
     // Hand off to the debounce filter loop
-    let tracker = tracker::Tracker::new(track_db);
-    run_filter_loop(
-        &mut real,
-        &mut virt,
-        &keys,
-        threshold,
-        extended_threshold,
-        short_hold_threshold,
-        log_forward,
-        &tracker,
-    )?;
+    let tracker = tracker::Tracker::new(cfg.track_db);
+    run_filter_loop(&mut real, &mut virt, &cfg.keys, &cfg.debounce, &tracker)?;
     Ok(())
 }
 
