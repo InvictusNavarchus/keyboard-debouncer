@@ -47,14 +47,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     let tracker = tracker::Tracker::new(cfg.track_db.clone());
+    let mut connected_before = false;
 
     loop {
         // Re-resolve device path from name on each attempt (handles USB re-enumeration)
         if let Some(name) = &cfg.keyboard_name {
             match config::find_device_by_name(name) {
-                Ok(path) => cfg.device_path = path,
-                Err(e) => {
-                    eprintln!("⚠ Device not found: {e}");
+                Ok(path) => {
+                    cfg.device_path = path;
+                    connected_before = true;
+                }
+                Err(_) => {
+                    if !connected_before {
+                        eprintln!("⚠ Device not found. Waiting for connection…");
+                    }
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
