@@ -12,6 +12,10 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
   `SHORT_HOLD_THRESHOLD_MS`), the next press must survive a longer
   `EXTENDED_THRESHOLD_MS` window. This catches a second bounce mode where the switch
   briefly loses contact then re‑engages tens of milliseconds later.
+- **Debounce all keys** (optional) – when enabled, all keys are debounced automatically
+  instead of only a curated list. Modifier keys and controls (Shift, Ctrl, Alt, Meta,
+  CapsLock, etc.) are intelligently excluded since they don't chatter and have different
+  timing semantics.
 - **Key health tracking** (optional) – passively records *every* key event (even
   non‑target keys) to an SQLite database. You can later query the data to identify
   switches that are starting to fail, **before** the chatter becomes noticeable.
@@ -50,7 +54,8 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 |--------------------------|----------------|-------------|
 | `KEYBOARD_NAME`          | 1 of these 2   | Keyboard name as shown by `evtest` – used to auto‑discover the event node. |
 | `DEVICE_PATH`            | 1 of these 2   | Direct path, e.g. `/dev/input/event10`. Overrides `KEYBOARD_NAME` if both are set. Useful when the event number is stable. |
-| `KEYS`                   | **Yes**        | Comma‑separated keys to debounce, using `KEY_*` names from `evtest` (example: `KEY_K,KEY_L,KEY_ENTER`). |
+| `KEYS`                   | **Yes**        | Comma‑separated keys to debounce, using `KEY_*` names from `evtest` (example: `KEY_K,KEY_L,KEY_ENTER`). Ignored if `DEBOUNCE_ALL_KEYS` is set. |
+| `DEBOUNCE_ALL_KEYS`      | No             | `true` / `false` – debounce all keyboard keys automatically instead of just the `KEYS` list. Modifier keys (Shift, Ctrl, Alt, Meta, CapsLock, NumLock, ScrollLock, Fn) are always excluded. Default: `false`. |
 | `THRESHOLD_MS`           | No             | Normal debounce window in ms. Any re‑press within this window of the last release is suppressed. Default: `30`. |
 | `EXTENDED_THRESHOLD_MS`  | No             | Extended window in ms, used when the previous press was abnormally short. Default: `100`. |
 | `SHORT_HOLD_THRESHOLD_MS`| No             | Hold duration in ms; if a legitimate press is held for less than this, the next press is subject to the extended window. Default: `50`. |
