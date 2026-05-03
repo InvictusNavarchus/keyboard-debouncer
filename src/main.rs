@@ -48,6 +48,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let tracker = tracker::Tracker::new(cfg.track_db.clone());
     let mut connected_before = false;
+    let mut last_message_was_not_found = false;
 
     loop {
         // Re-resolve device path from name on each attempt (handles USB re-enumeration)
@@ -56,10 +57,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(path) => {
                     cfg.device_path = path;
                     connected_before = true;
+                    last_message_was_not_found = false;
                 }
                 Err(_) => {
-                    if !connected_before {
+                    if !connected_before && !last_message_was_not_found {
                         eprintln!("⚠ Device not found. Waiting for connection…");
+                        last_message_was_not_found = true;
                     }
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
