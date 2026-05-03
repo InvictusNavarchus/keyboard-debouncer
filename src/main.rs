@@ -30,11 +30,8 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::parse_args()?;
-    let mut real = Device::open(&cfg.device_path)?;
 
     println!("keyboard-debouncer starting");
-    println!("  device name    : {}", real.name().unwrap_or("(unknown)"));
-    println!("  device path    : {}", cfg.device_path.display());
     println!("  target keys: {:?}", cfg.keys);
     println!("  debounce all: {}", cfg.debounce.debounce_all);
     println!("  threshold : {} ms", cfg.debounce.threshold_ms);
@@ -46,6 +43,37 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("  tracker   : (disabled)");
     }
+    println!();
+
+    let tracker = tracker::Tracker::new(cfg.track_db.clone());
+
+    loop {
+        match setup_and_filter(&cfg, &tracker) {
+            Ok(()) => {
+                eprintln!("⚠ Device disconnected unexpectedly. Waiting for reconnection…");
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            Err(e) => {
+                eprintln!("Fatal error: {e}");
+                return Err(e);
+            }
+        }
+    }
+}
+
+/// Setup the device and run the debounce filter loop until the device is disconnected.
+///
+/// Returns `Ok(())` if the device was unplugged (allowing reconnection retry).
+/// Returns `Err(_)` for fatal errors.
+fn setup_and_filter(
+    cfg: &config::Config,
+    tracker: &tracker::Tracker,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut real = Device::open(&cfg.device_path)?;
+
+    println!("Device opened");
+    println!("  name    : {}", real.name().unwrap_or("(unknown)"));
+    println!("  path    : {}", cfg.device_path.display());
 
     let mut virt = build_virtual_device(&real)?;
 
@@ -82,17 +110,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Running… (Ctrl-C to stop)\n");
 
-    // Hand off to the debounce filter loop
-    let tracker = tracker::Tracker::new(cfg.track_db);
-    run_filter_loop(
+    // Hand off to the debounce filter loop. If the device is unplugged,
+    // this will return Err(ENODEV) which we convert to Ok() to trigger reconnection.
+    match run_filter_loop(
         &mut real,
         &mut virt,
         &cfg.keys,
         &cfg.debounce,
         &tracker,
         cfg.debounce.debounce_all,
-    )?;
-    Ok(())
+    ) {
+        Err(e) if is_device_disconnected(&e) => Ok(()),
+        other => other,
+    }
+}
+
+// ── device disconnection detection ─────────────────────────────────────────────
+
+/// Check if an error is caused by device disconnection (ENODEV).
+/// ENODEV is errno 19 on Linux and indicates the device no longer exists.
+fn is_device_disconnected(err: &Box<dyn std::error::Error>) -> bool {
+    err.to_string().contains("No such device")
 }
 
 // ── startup drain helper ─────────────────────────────────────────────────────
