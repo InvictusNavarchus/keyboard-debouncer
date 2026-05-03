@@ -3,6 +3,7 @@ use crate::debounce::{
 };
 use evdev::Key;
 use std::collections::HashMap;
+use std::time::Duration;
 use std::{env, io, path::PathBuf};
 
 /// Configuration for debounce filtering.
@@ -33,55 +34,61 @@ fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
 }
 
 fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let mut permission_denied_count = 0usize;
+    let poll_interval = Duration::from_millis(500);
+    let mut last_permission_denied = 0usize;
 
-    for entry in std::fs::read_dir("/dev/input")? {
-        let path = entry?.path();
+    loop {
+        let mut permission_denied_count = 0usize;
+        let mut found_any_event_node = false;
 
-        // Only consider event nodes
-        let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if !fname.starts_with("event") {
-            continue;
-        }
+        match std::fs::read_dir("/dev/input") {
+            Err(e) => {
+                eprintln!("Warning: cannot read /dev/input: {e} — retrying…");
+                std::thread::sleep(poll_interval);
+                continue;
+            }
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    if !fname.starts_with("event") {
+                        continue;
+                    }
+                    found_any_event_node = true;
 
-        match evdev::Device::open(&path) {
-            Ok(device) => {
-                if device.name().map(str::trim) == Some(target_name) {
-                    return Ok(path);
+                    match evdev::Device::open(&path) {
+                        Ok(device) => {
+                            if device.name().map(str::trim) == Some(target_name) {
+                                eprintln!("Found device '{target_name}' at {}", path.display());
+                                return Ok(path);
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                            permission_denied_count += 1;
+                        }
+                        Err(_) => {}
+                    }
                 }
             }
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-                permission_denied_count += 1;
-            }
-            Err(_) => {} // Unreadable for other reasons (e.g. not an event device), skip
         }
-    }
 
-    if permission_denied_count > 0 {
-        Err(format!(
-            "Device '{target_name}' not found — {permission_denied_count} input device(s) \
-             were unreadable due to permissions.\n\
-             \n\
-             Fix (recommended, no root needed after setup):\n\
-               sudo usermod -aG input $USER   # then log out and back in\n\
-             \n\
-             Or add a udev rule:\n\
-               echo 'SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"0660\"' \
-             | sudo tee /etc/udev/rules.d/99-keyboard-debouncer.rules\n\
-               sudo udevadm control --reload && sudo udevadm trigger\n\
-             \n\
-             Or run once as root:\n\
-               sudo keyboard-debouncer [config]"
-        )
-        .into())
-    } else {
-        Err(format!(
-            "No input device found with name '{target_name}'.\n\
-             Check available devices with: sudo libinput list-devices"
-        )
-        .into())
+        // Log permission errors once, not on every poll cycle
+        if permission_denied_count > 0 && permission_denied_count != last_permission_denied {
+            eprintln!(
+                "Warning: {permission_denied_count} input device(s) unreadable due to permissions.\n\
+                 Fix: sudo usermod -aG input $USER  (then log out/in)\n\
+                 Continuing to wait for '{target_name}'…"
+            );
+            last_permission_denied = permission_denied_count;
+        }
+
+        if !found_any_event_node {
+            eprintln!("Warning: no event nodes in /dev/input yet — waiting…");
+        }
+
+        std::thread::sleep(poll_interval);
     }
 }
 
