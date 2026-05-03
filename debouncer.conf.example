@@ -16,7 +16,11 @@ KEYBOARD_NAME=your-keyboard-name-in-evtest
 # REQUIRED: the program refuses to start without this.
 # Example: KEYS=KEY_K,KEY_L,KEY_ENTER
 KEYS=KEY_K,KEY_L
-
+# Debounce all keys instead of just the KEYS list.
+# Default: false. When set to true, all keys are debounced except modifier/control keys.
+# Modifier keys excluded: Shift, Ctrl, Alt, Meta, CapsLock, NumLock, ScrollLock, Fn.
+# If both KEYS and DEBOUNCE_ALL_KEYS are set, all keys are debounced (KEYS becomes informational).
+# DEBOUNCE_ALL_KEYS=false
 # Debounce window in milliseconds.
 # Default: 30. Any re-press within this window after the last release is suppressed.
 THRESHOLD_MS=30
