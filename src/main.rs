@@ -32,7 +32,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::parse_args()?;
 
     println!("keyboard-debouncer starting");
-    println!("  device    : {}", cfg.device_path.display());
+    println!("  device path    : {}", cfg.device_path.display());
     println!("  target keys: {:?}", cfg.keys);
     println!("  debounce all: {}", cfg.debounce.debounce_all);
     println!("  threshold : {} ms", cfg.debounce.threshold_ms);
@@ -46,7 +46,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut real = Device::open(&cfg.device_path)?;
-    println!("  name      : {}", real.name().unwrap_or("(unknown)"));
+    println!(" device name      : {}", real.name().unwrap_or("(unknown)"));
 
     let mut virt = build_virtual_device(&real)?;
 
