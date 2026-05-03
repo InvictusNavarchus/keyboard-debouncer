@@ -30,8 +30,10 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::parse_args()?;
+    let mut real = Device::open(&cfg.device_path)?;
 
     println!("keyboard-debouncer starting");
+    println!("  device name    : {}", real.name().unwrap_or("(unknown)"));
     println!("  device path    : {}", cfg.device_path.display());
     println!("  target keys: {:?}", cfg.keys);
     println!("  debounce all: {}", cfg.debounce.debounce_all);
@@ -44,9 +46,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("  tracker   : (disabled)");
     }
-
-    let mut real = Device::open(&cfg.device_path)?;
-    println!(" device name      : {}", real.name().unwrap_or("(unknown)"));
 
     let mut virt = build_virtual_device(&real)?;
 
