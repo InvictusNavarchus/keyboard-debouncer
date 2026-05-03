@@ -18,6 +18,7 @@ use evdev::{
     Device,
 };
 use std::{os::unix::io::AsRawFd, time::Duration};
+use std::error::Error as StdError;
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
@@ -127,10 +128,21 @@ fn setup_and_filter(
 
 // ── device disconnection detection ─────────────────────────────────────────────
 
-/// Check if an error is caused by device disconnection (ENODEV).
-/// ENODEV is errno 19 on Linux and indicates the device no longer exists.
+/// Check if an error is caused by device disconnection (ENODEV errno 19).
+/// Traverses the error chain to find io::Error with the correct errno.
 fn is_device_disconnected(err: &Box<dyn std::error::Error>) -> bool {
-    err.to_string().contains("No such device")
+    // Check the root error and all causes in the chain
+    let mut current: Option<&dyn StdError> = Some(err.as_ref());
+    while let Some(err) = current {
+        if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
+            // ENODEV is errno 19 on Linux (device not found)
+            if io_err.raw_os_error() == Some(19) {
+                return true;
+            }
+        }
+        current = err.source();
+    }
+    false
 }
 
 // ── startup drain helper ─────────────────────────────────────────────────────
