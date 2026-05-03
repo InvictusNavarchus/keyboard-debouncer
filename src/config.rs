@@ -18,6 +18,7 @@ pub struct DebounceConfig {
 /// Top-level application configuration.
 pub struct Config {
     pub device_path: PathBuf,
+    pub keyboard_name: Option<String>, // Stored for re-resolution on USB re-enumeration
     pub keys: Vec<Key>,
     pub debounce: DebounceConfig,
     pub track_db: Option<PathBuf>,
@@ -33,7 +34,7 @@ fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
         .collect()
 }
 
-fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let poll_interval = Duration::from_millis(500);
     let mut last_permission_denied = 0usize;
 
@@ -161,9 +162,10 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
         .map(|v| v == "true")
         .unwrap_or(false);
 
+    let keyboard_name = conf.get("KEYBOARD_NAME").cloned();
     let device_path = if let Some(path_str) = conf.get("DEVICE_PATH") {
         PathBuf::from(path_str)
-    } else if let Some(name) = conf.get("KEYBOARD_NAME") {
+    } else if let Some(name) = &keyboard_name {
         find_device_by_name(name)?
     } else {
         return Err("Either DEVICE_PATH or KEYBOARD_NAME must be set in config".into());
@@ -177,6 +179,7 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
 
     Ok(Config {
         device_path,
+        keyboard_name,
         keys: target_keys,
         debounce: DebounceConfig {
             threshold_ms,

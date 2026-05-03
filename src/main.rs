@@ -30,7 +30,7 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let cfg = config::parse_args()?;
+    let mut cfg = config::parse_args()?;
 
     println!("keyboard-debouncer starting");
     println!("  target keys: {:?}", cfg.keys);
@@ -49,9 +49,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let tracker = tracker::Tracker::new(cfg.track_db.clone());
 
     loop {
+        // Re-resolve device path from name on each attempt (handles USB re-enumeration)
+        if let Some(name) = &cfg.keyboard_name {
+            match config::find_device_by_name(name) {
+                Ok(path) => cfg.device_path = path,
+                Err(e) => {
+                    eprintln!("⚠ Device not found: {e}");
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+            }
+        }
+
         match setup_and_filter(&cfg, &tracker) {
             Ok(()) => {
-                eprintln!("⚠ Device disconnected unexpectedly. Waiting for reconnection…");
+                eprintln!("⚠ Device disconnected. Waiting for reconnection…");
                 std::thread::sleep(Duration::from_secs(1));
             }
             Err(e) => {
@@ -128,16 +140,18 @@ fn setup_and_filter(
 
 // ── device disconnection detection ─────────────────────────────────────────────
 
-/// Check if an error is caused by device disconnection (ENODEV errno 19).
-/// Traverses the error chain to find io::Error with the correct errno.
+/// Check if an error is caused by device disconnection.
+/// Returns true for:
+/// - ENODEV (errno 19): device removed from running file descriptor
+/// - ENOENT (errno 2): device node deleted, can't open on reconnection attempt
 fn is_device_disconnected(err: &Box<dyn std::error::Error>) -> bool {
-    // Check the root error and all causes in the chain
     let mut current: Option<&dyn StdError> = Some(err.as_ref());
     while let Some(err) = current {
         if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
-            // ENODEV is errno 19 on Linux (device not found)
-            if io_err.raw_os_error() == Some(19) {
-                return true;
+            match io_err.raw_os_error() {
+                Some(19) => return true, // ENODEV — device removed from running handle
+                Some(2)  => return true, // ENOENT — device node gone, can't open
+                _ => {}
             }
         }
         current = err.source();
