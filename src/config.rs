@@ -164,16 +164,18 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
 
     let keyboard_name = conf.get("KEYBOARD_NAME").cloned();
     let device_path = if let Some(path_str) = conf.get("DEVICE_PATH") {
-        PathBuf::from(path_str)
-    } else if let Some(name) = &keyboard_name {
-        find_device_by_name(name)?
+        let path = PathBuf::from(path_str);
+        // Only validate explicit DEVICE_PATH exists; KEYBOARD_NAME resolution happens in main loop
+        if !path.exists() {
+            return Err(format!("Device path {} does not exist", path.display()).into());
+        }
+        path
+    } else if keyboard_name.is_some() {
+        // Device will be discovered in the main loop; use placeholder for now
+        PathBuf::from("")
     } else {
         return Err("Either DEVICE_PATH or KEYBOARD_NAME must be set in config".into());
     };
-
-    if !device_path.exists() {
-        return Err(format!("Device path {} does not exist", device_path.display()).into());
-    }
 
     let track_db = conf.get("TRACK_DB").map(PathBuf::from);
 
