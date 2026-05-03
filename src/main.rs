@@ -139,7 +139,7 @@ fn setup_and_filter(
         &mut virt,
         &cfg.keys,
         &cfg.debounce,
-        &tracker,
+        tracker,
         cfg.debounce.debounce_all,
     ) {
         Err(e) if is_device_disconnected(&e) => Ok(()),
