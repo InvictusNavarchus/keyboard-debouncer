@@ -101,6 +101,29 @@ fn fmt_hold(last_dn_at: Option<Instant>) -> (Option<Duration>, String) {
     (hold, s)
 }
 
+// ── modifier key detection ────────────────────────────────────────────────────
+
+/// Keys that should never be debounced in `debounce_all` mode.
+/// Modifiers, locks, and media controls don't chatter and have
+/// different timing semantics (held-down combos, etc.).
+fn is_modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::KEY_LEFTSHIFT
+            | Key::KEY_RIGHTSHIFT
+            | Key::KEY_LEFTCTRL
+            | Key::KEY_RIGHTCTRL
+            | Key::KEY_LEFTALT
+            | Key::KEY_RIGHTALT
+            | Key::KEY_LEFTMETA
+            | Key::KEY_RIGHTMETA
+            | Key::KEY_CAPSLOCK
+            | Key::KEY_NUMLOCK
+            | Key::KEY_SCROLLLOCK
+            | Key::KEY_FN
+    )
+}
+
 // ── filter loop ───────────────────────────────────────────────────────────────
 
 /// Core event loop.
@@ -119,6 +142,7 @@ pub fn run_filter_loop(
     keys: &[Key],
     cfg: &crate::config::DebounceConfig,
     tracker: &crate::tracker::Tracker,
+    debounce_all: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let threshold = Duration::from_millis(cfg.threshold_ms);
     let extended_threshold = Duration::from_millis(cfg.extended_threshold_ms);
@@ -133,7 +157,13 @@ pub fn run_filter_loop(
             // Determine whether this event belongs to one of the target keys.
             // Non-target keys are forwarded immediately without touching any state.
             let (target_key, is_target) = match event.kind() {
-                evdev::InputEventKind::Key(k) => (k, key_states.contains_key(&k)),
+                evdev::InputEventKind::Key(k) => {
+                    // Lazy-insert for debounce_all mode (skip modifier/control keys)
+                    if debounce_all && !is_modifier_key(k) {
+                        key_states.entry(k).or_insert_with(PerKeyState::new);
+                    }
+                    (k, key_states.contains_key(&k))
+                }
                 _ => {
                     virt.emit(&[event])?;
                     continue;

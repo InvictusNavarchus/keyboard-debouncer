@@ -34,6 +34,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("keyboard-debouncer starting");
     println!("  device    : {}", cfg.device_path.display());
     println!("  target keys: {:?}", cfg.keys);
+    println!("  debounce all: {}", cfg.debounce.debounce_all);
     println!("  threshold : {} ms", cfg.debounce.threshold_ms);
     println!("  ext thres : {} ms", cfg.debounce.extended_threshold_ms);
     println!("  short hold: {} ms", cfg.debounce.short_hold_threshold_ms);
@@ -84,7 +85,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Hand off to the debounce filter loop
     let tracker = tracker::Tracker::new(cfg.track_db);
-    run_filter_loop(&mut real, &mut virt, &cfg.keys, &cfg.debounce, &tracker)?;
+    run_filter_loop(
+        &mut real,
+        &mut virt,
+        &cfg.keys,
+        &cfg.debounce,
+        &tracker,
+        cfg.debounce.debounce_all,
+    )?;
     Ok(())
 }
 

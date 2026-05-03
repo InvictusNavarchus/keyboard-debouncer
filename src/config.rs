@@ -11,6 +11,7 @@ pub struct DebounceConfig {
     pub extended_threshold_ms: u64,
     pub short_hold_threshold_ms: u64,
     pub log_forward: bool,
+    pub debounce_all: bool,
 }
 
 /// Top-level application configuration.
@@ -148,6 +149,11 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
         .map(|v| v == "true")
         .unwrap_or(false);
 
+    let debounce_all = conf
+        .get("DEBOUNCE_ALL_KEYS")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     let device_path = if let Some(path_str) = conf.get("DEVICE_PATH") {
         PathBuf::from(path_str)
     } else if let Some(name) = conf.get("KEYBOARD_NAME") {
@@ -170,6 +176,7 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
             extended_threshold_ms,
             short_hold_threshold_ms,
             log_forward,
+            debounce_all,
         },
         track_db,
     })
