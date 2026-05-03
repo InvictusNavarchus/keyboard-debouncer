@@ -17,8 +17,8 @@ use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
     Device,
 };
-use std::{os::unix::io::AsRawFd, time::Duration};
 use std::error::Error as StdError;
+use std::{os::unix::io::AsRawFd, time::Duration};
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
@@ -156,7 +156,7 @@ fn is_device_disconnected(err: &Box<dyn std::error::Error>) -> bool {
         if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
             match io_err.raw_os_error() {
                 Some(19) => return true, // ENODEV — device removed from running handle
-                Some(2)  => return true, // ENOENT — device node gone, can't open
+                Some(2) => return true,  // ENOENT — device node gone, can't open
                 _ => {}
             }
         }
