@@ -149,9 +149,11 @@ mechanical switch:
 
 ### `THRESHOLD_MS = 30`
 
-Normal inter-key gap at 150 WPM is ~80 ms. Even at 200 WPM it's ~60 ms. Observed
-bounce gaps (after normal holds) were 7–20 ms. 30 ms sits comfortably in the
-clear zone between those ranges.
+Each key's gap is measured independently — `gap = now − last_up` for that
+specific key, not across different keys. Observed bounce gaps after normal
+holds were 7–20 ms. A deliberate same-key re-press (e.g. "aa") at any sane
+typing speed produces gaps of 150 ms or more. 30 ms sits safely above the
+observed bounce range and far below any conscious re-press of the same key.
 
 ### `SHORT_HOLD_THRESHOLD_MS = 70`
 
