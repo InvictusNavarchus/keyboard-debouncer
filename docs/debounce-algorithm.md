@@ -150,10 +150,16 @@ mechanical switch:
 ### `THRESHOLD_MS = 30`
 
 Each key's gap is measured independently — `gap = now − last_up` for that
-specific key, not across different keys. Observed bounce gaps after normal
-holds were 7–20 ms. Measured deliberate same-key re-press gaps in fast typing
-are ~50–70 ms. 30 ms sits safely above the observed bounce range and well
-below the minimum deliberate re-press gap.
+specific key. This is the **UP→DN** interval: from when the key was released
+to when it was next pressed. It is *not* the DN→DN interval a typist would
+naturally perceive; those two relate as:
+
+```
+UP→DN gap = DN→DN interval − hold duration
+```
+
+Observed bounce gaps (UP→DN) after normal holds were 7–20 ms. The base
+threshold of 30 ms sits safely above this range for Normal-tier presses.
 
 ### `SHORT_HOLD_THRESHOLD_MS = 70`
 
@@ -169,12 +175,14 @@ Normal tier.
 After a Short hold, bounces were observed at 67–70 ms — just above the old 60 ms
 extended threshold. 100 ms catches this range.
 
-> **Caveat**: if a deliberate press has a hold of 20–70 ms (Short tier) and
-> the same key is immediately re-pressed with a gap under 100 ms, that re-press
-> will be falsely suppressed. Measured fast-typing same-key gaps are ~50–70 ms,
-> so this overlap is real. If you observe false positives on rapid same-key
-> repetition, lower `SHORT_HOLD_THRESHOLD_MS` (e.g. to 50 ms) so that more
-> deliberate presses fall into the Normal tier.
+> **Caveat**: for very fast same-key repetition, the DN→DN interval and the
+> hold duration are tightly coupled — you cannot hold longer than the DN→DN.
+> A DN→DN interval below ~100 ms forces hold below 100 ms (Short or Micro tier),
+> which arms the extended threshold. The resulting UP→DN gap (= DN→DN − hold)
+> is then likely to fall below 100 ms and be suppressed. In practice this
+> means rapid same-key repetition with a DN→DN interval under ~100 ms may
+> be blocked. If you observe false positives, lower `SHORT_HOLD_THRESHOLD_MS`
+> so that more fast presses classify as Normal and use the base threshold.
 
 ### `MICRO_HOLD_THRESHOLD_MS = 20`
 
