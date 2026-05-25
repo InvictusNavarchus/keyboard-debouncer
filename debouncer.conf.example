@@ -25,13 +25,27 @@ KEYS=KEY_K,KEY_L
 # Default: 30. Any re-press within this window after the last release is suppressed.
 THRESHOLD_MS=30
 
+# Short hold duration threshold in milliseconds.
+# Default: 70. A hold below this (but above MICRO_HOLD_THRESHOLD_MS) arms the extended
+# debounce window. Raised to 70 ms to also catch medium bounces (59–63 ms observed in
+# hardware data) which fall above the old 40–50 ms threshold.
+SHORT_HOLD_THRESHOLD_MS=70
+
 # Extended debounce window in milliseconds.
-# Default: 100. Used when the previous press was abnormally short.
+# Default: 100. Used after a short hold. Covers the 67–100 ms bounce gaps that follow
+# partial-contact presses.
 EXTENDED_THRESHOLD_MS=100
 
-# Short hold duration threshold in milliseconds.
-# Default: 50. Hold duration below this will trigger extended debouncing for the next cycle.
-SHORT_HOLD_THRESHOLD_MS=50
+# Micro hold duration threshold in milliseconds.
+# Default: 20. A hold below this is classified as hardware ghost contact — no human
+# intentionally holds a key for less than 20 ms. Arms the micro-extended window.
+MICRO_HOLD_THRESHOLD_MS=20
+
+# Micro-extended debounce window in milliseconds.
+# Default: 150. Used after a micro hold. Covers the 79–99 ms bounce gaps that follow
+# 3–11 ms ghost contacts. Safe for double-letter typing ("ee", "oo") since conscious
+# same-key re-strikes at 120 WPM are typically 160–220 ms.
+MICRO_EXTENDED_THRESHOLD_MS=150
 
 # Set to true to log every forwarded event immediately.
 # Default: false (forwarded events are only shown when followed by a suppressed one, for context).

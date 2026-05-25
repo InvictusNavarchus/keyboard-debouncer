@@ -15,18 +15,48 @@ use colored::Colorize;
 /// (together with its matching UP).
 ///
 /// From the log analysis: bounce intervals were 7–20 ms, real inter-key gaps
-/// are well above 30 ms even at 150 WPM. 15 ms is a safe middle ground.
-/// personal test data shows that the bounce range between 6-17.9 ms. setting it to 30ms is much safer
+/// are well above 30 ms even at 150 WPM. Personal test data shows bounce range
+/// 6–17.9 ms; 30 ms is a safe baseline.
 pub const DEFAULT_THRESHOLD_MS: u64 = 30;
 
-/// Extended debounce window used when the previous press was
-/// abnormally short (< 20 ms). This catches the slower bounce mode where a
-/// brief false contact is followed by re-engagement at 33–50 ms later.
+/// Extended debounce window used after a short hold (hold in `[MICRO_HOLD, SHORT_HOLD)`).
+/// Catches the slower bounce mode where partial contact is followed by
+/// re-engagement at 33–100 ms later.
 pub const DEFAULT_EXTENDED_THRESHOLD_MS: u64 = 100;
 
-/// Hold duration threshold to detect a short/bouncy press that should trigger
-/// extended debouncing for the next cycle.
-pub const DEFAULT_SHORT_HOLD_THRESHOLD_MS: u64 = 50;
+/// Hold duration threshold for a "short" press. Holds in `[MICRO_HOLD_THRESHOLD_MS,
+/// SHORT_HOLD_THRESHOLD_MS)` arm the extended debounce window for the next cycle.
+/// Set to 70 ms to also catch medium bounces (59–63 ms observed in hardware data).
+pub const DEFAULT_SHORT_HOLD_THRESHOLD_MS: u64 = 70;
+
+/// Hold duration below which a press is classified as hardware ghost contact.
+/// No human holds a key for less than this; sub-threshold holds arm the
+/// maximum lockout window for the next cycle.
+pub const DEFAULT_MICRO_HOLD_THRESHOLD_MS: u64 = 20;
+
+/// Debounce window after a micro hold. Since micro holds indicate pure hardware
+/// chatter rather than a real press, a long lockout is safe and necessary.
+/// Covers the observed 79–99 ms bounce gaps that follow 3–11 ms ghost contacts.
+pub const DEFAULT_MICRO_EXTENDED_THRESHOLD_MS: u64 = 150;
+
+// ── hold tier ────────────────────────────────────────────────────────────────
+
+/// Classifies the duration of the last forwarded keypress to select how
+/// aggressive the next debounce window should be.
+///
+/// - [`Micro`]: hold < `MICRO_HOLD_THRESHOLD_MS` — hardware ghost contact,
+///   arms the maximum lockout window.
+/// - [`Short`]: hold in `[MICRO_HOLD, SHORT_HOLD)` — suspicious partial contact,
+///   arms the extended lockout window.
+/// - [`Normal`]: hold ≥ `SHORT_HOLD_THRESHOLD_MS` — legitimate press, uses
+///   the base threshold.
+#[derive(Default)]
+enum HoldTier {
+    #[default]
+    Normal,
+    Short,
+    Micro,
+}
 
 // ── per-key debounce state ────────────────────────────────────────────────────
 
@@ -51,9 +81,9 @@ pub struct PerKeyState {
     /// true while we are inside a suppressed press/release pair (so we can
     /// also swallow the matching UP).
     suppressed: bool,
-    /// Was the previous hold abnormally short?  If so, use the extended
-    /// threshold for the next DN.
-    last_hold_was_short: bool,
+    /// How the previous forwarded hold was classified. Determines which
+    /// debounce threshold applies to the next DN event.
+    last_hold_tier: HoldTier,
     /// Buffered forward log messages, emitted only when a subsequent suppress
     /// provides context.
     pending: Vec<String>,
@@ -65,18 +95,23 @@ impl PerKeyState {
             last_up: None,
             last_dn_at: None,
             suppressed: false,
-            last_hold_was_short: false,
+            last_hold_tier: HoldTier::Normal,
             pending: Vec::new(),
         }
     }
 
-    /// Select the active threshold (normal or extended) and return both the duration
-    /// and a label for logging, based on whether the previous hold was abnormally short.
-    fn active_threshold(&self, normal: Duration, extended: Duration) -> (Duration, &'static str) {
-        if self.last_hold_was_short {
-            (extended, "extended")
-        } else {
-            (normal, "normal")
+    /// Select the active threshold based on the previous hold's tier, returning
+    /// both the duration and a label for logging.
+    fn active_threshold(
+        &self,
+        normal: Duration,
+        extended: Duration,
+        micro_extended: Duration,
+    ) -> (Duration, &'static str) {
+        match self.last_hold_tier {
+            HoldTier::Micro => (micro_extended, "micro-extended"),
+            HoldTier::Short => (extended, "extended"),
+            HoldTier::Normal => (normal, "normal"),
         }
     }
 
@@ -147,6 +182,8 @@ pub fn run_filter_loop(
     let threshold = Duration::from_millis(cfg.threshold_ms);
     let extended_threshold = Duration::from_millis(cfg.extended_threshold_ms);
     let short_hold_threshold = Duration::from_millis(cfg.short_hold_threshold_ms);
+    let micro_hold_threshold = Duration::from_millis(cfg.micro_hold_threshold_ms);
+    let micro_extended_threshold = Duration::from_millis(cfg.micro_extended_threshold_ms);
 
     // Initialise independent debounce state for every target key.
     let mut key_states: HashMap<Key, PerKeyState> =
@@ -188,7 +225,9 @@ pub fn run_filter_loop(
                 target_key,
                 threshold,
                 extended_threshold,
+                micro_extended_threshold,
                 short_hold_threshold,
+                micro_hold_threshold,
                 state,
             );
 
@@ -201,6 +240,7 @@ pub fn run_filter_loop(
                 &ts,
                 cfg.log_forward,
                 short_hold_threshold,
+                micro_hold_threshold,
             );
 
             tracker.track(target_key, event.value(), !forward, now);
@@ -237,7 +277,9 @@ fn process_event(
     key: Key,
     threshold: Duration,
     extended_threshold: Duration,
+    micro_extended_threshold: Duration,
     short_hold_threshold: Duration,
+    micro_hold_threshold: Duration,
     state: &PerKeyState,
 ) -> EventDecision {
     // Auto-repeat (value == 2): forward unconditionally, no decision logic needed.
@@ -247,7 +289,8 @@ fn process_event(
         };
     }
 
-    let (active_threshold, threshold_label) = state.active_threshold(threshold, extended_threshold);
+    let (active_threshold, threshold_label) =
+        state.active_threshold(threshold, extended_threshold, micro_extended_threshold);
     let active_threshold_ms = active_threshold.as_millis();
 
     match event.value() {
@@ -289,13 +332,16 @@ fn process_event(
                 }
             } else {
                 let (hold, hold_str) = fmt_hold(state.last_dn_at);
-                let reason = if hold.map(|h| h < short_hold_threshold).unwrap_or(false) {
-                    let next_ms = extended_threshold.as_millis();
-                    format!(
-                        "{key:?}  hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)"
-                    )
-                } else {
-                    format!("{key:?}  hold={hold_str}")
+                let reason = match hold {
+                    Some(h) if h < micro_hold_threshold => {
+                        let next_ms = micro_extended_threshold.as_millis();
+                        format!("{key:?}  hold={hold_str}  ⚠ micro hold → next threshold={next_ms}ms (micro-extended)")
+                    }
+                    Some(h) if h < short_hold_threshold => {
+                        let next_ms = extended_threshold.as_millis();
+                        format!("{key:?}  hold={hold_str}  ⚠ short hold → next threshold={next_ms}ms (extended)")
+                    }
+                    _ => format!("{key:?}  hold={hold_str}"),
                 };
                 EventDecision::Forward { reason }
             }
@@ -316,6 +362,7 @@ fn apply_decision(
     ts: &str,
     log_forward: bool,
     short_hold_threshold: Duration,
+    micro_hold_threshold: Duration,
 ) -> bool {
     match decision {
         EventDecision::Forward { reason } => {
@@ -345,8 +392,11 @@ fn apply_decision(
                     // Key Up
                     let now = Instant::now();
                     let hold = state.last_dn_at.map(|t| now.duration_since(t));
-                    state.last_hold_was_short =
-                        hold.map(|h| h < short_hold_threshold).unwrap_or(false);
+                    state.last_hold_tier = match hold {
+                        Some(h) if h < micro_hold_threshold => HoldTier::Micro,
+                        Some(h) if h < short_hold_threshold => HoldTier::Short,
+                        _ => HoldTier::Normal,
+                    };
                     state.last_up = Some(now);
                 }
                 _ => {} // Auto-repeat: no state update needed

@@ -1,5 +1,6 @@
 use crate::debounce::{
-    DEFAULT_EXTENDED_THRESHOLD_MS, DEFAULT_SHORT_HOLD_THRESHOLD_MS, DEFAULT_THRESHOLD_MS,
+    DEFAULT_EXTENDED_THRESHOLD_MS, DEFAULT_MICRO_EXTENDED_THRESHOLD_MS,
+    DEFAULT_MICRO_HOLD_THRESHOLD_MS, DEFAULT_SHORT_HOLD_THRESHOLD_MS, DEFAULT_THRESHOLD_MS,
 };
 use evdev::Key;
 use std::collections::HashMap;
@@ -10,6 +11,8 @@ pub struct DebounceConfig {
     pub threshold_ms: u64,
     pub extended_threshold_ms: u64,
     pub short_hold_threshold_ms: u64,
+    pub micro_hold_threshold_ms: u64,
+    pub micro_extended_threshold_ms: u64,
     pub log_forward: bool,
     pub debounce_all: bool,
 }
@@ -141,6 +144,16 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_SHORT_HOLD_THRESHOLD_MS);
 
+    let micro_hold_threshold_ms = conf
+        .get("MICRO_HOLD_THRESHOLD_MS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MICRO_HOLD_THRESHOLD_MS);
+
+    let micro_extended_threshold_ms = conf
+        .get("MICRO_EXTENDED_THRESHOLD_MS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MICRO_EXTENDED_THRESHOLD_MS);
+
     let log_forward = conf
         .get("LOG_FORWARD")
         .map(|v| v == "true")
@@ -176,6 +189,8 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
             threshold_ms,
             extended_threshold_ms,
             short_hold_threshold_ms,
+            micro_hold_threshold_ms,
+            micro_extended_threshold_ms,
             log_forward,
             debounce_all,
         },
