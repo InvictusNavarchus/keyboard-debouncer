@@ -6,12 +6,16 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 
 ## Features
 
-- **Normal debounce** – suppresses a re‑press that arrives within `THRESHOLD_MS` after
+- **Normal debounce** – suppresses a re-press that arrives within `THRESHOLD_MS` after
   the last physical release.
-- **Extended debounce** – if a legitimate press was abnormally short (held for less than
-  `SHORT_HOLD_THRESHOLD_MS`), the next press must survive a longer
-  `EXTENDED_THRESHOLD_MS` window. This catches a second bounce mode where the switch
-  briefly loses contact then re‑engages tens of milliseconds later.
+- **Tiered extended debounce** – classifies every forwarded keypress by its hold duration
+  into one of three tiers, each arming a progressively stricter debounce window for the
+  next cycle:
+  - *Micro* (`< MICRO_HOLD_THRESHOLD_MS`, default 20 ms) — hardware ghost contact; arms a
+    150 ms lockout.
+  - *Short* (`< SHORT_HOLD_THRESHOLD_MS`, default 70 ms) — suspicious partial contact; arms
+    a 100 ms lockout.
+  - *Normal* (≥ 70 ms) — legitimate press; uses the base threshold.
 - **Debounce all keys** (optional) – when enabled, all keys are debounced automatically
   instead of only a curated list. Modifier keys and controls (Shift, Ctrl, Alt, Meta,
   CapsLock, etc.) are intelligently excluded since they don't chatter and have different
@@ -50,19 +54,23 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 
 ## Configuration (`debouncer.conf`)
 
-| Field                    | Required?      | Description |
-|--------------------------|----------------|-------------|
-| `KEYBOARD_NAME`          | 1 of these 2   | Keyboard name as shown by `evtest` – used to auto‑discover the event node. |
-| `DEVICE_PATH`            | 1 of these 2   | Direct path, e.g. `/dev/input/event10`. Overrides `KEYBOARD_NAME` if both are set. Useful when the event number is stable. |
-| `KEYS`                   | **Yes**        | Comma‑separated keys to debounce, using `KEY_*` names from `evtest` (example: `KEY_K,KEY_L,KEY_ENTER`). Ignored if `DEBOUNCE_ALL_KEYS` is set. |
-| `DEBOUNCE_ALL_KEYS`      | No             | `true` / `false` – debounce all keyboard keys automatically instead of just the `KEYS` list. Modifier keys (Shift, Ctrl, Alt, Meta, CapsLock, NumLock, ScrollLock, Fn) are always excluded. Default: `false`. |
-| `THRESHOLD_MS`           | No             | Normal debounce window in ms. Any re‑press within this window of the last release is suppressed. Default: `30`. |
-| `EXTENDED_THRESHOLD_MS`  | No             | Extended window in ms, used when the previous press was abnormally short. Default: `100`. |
-| `SHORT_HOLD_THRESHOLD_MS`| No             | Hold duration in ms; if a legitimate press is held for less than this, the next press is subject to the extended window. Default: `50`. |
-| `LOG_FORWARD`            | No             | `true` / `false` – log every forwarded event immediately instead of only on context (when a suppress follows). Default: `false`. |
-| `TRACK_DB`               | No             | Path to an SQLite file, e.g. `/var/lib/keyboard-debouncer/keys.db`. When set, the daemon passively records every key event (including non‑target keys) for health analysis. The database is created automatically. Make sure the parent directory exists and restrict permissions (e.g. `chmod 600`). Disabled by default. |
+| Field                          | Required?      | Description |
+|--------------------------------|----------------|-------------|
+| `KEYBOARD_NAME`                | 1 of these 2   | Keyboard name as shown by `evtest` — used to auto-discover the event node. |
+| `DEVICE_PATH`                  | 1 of these 2   | Direct path, e.g. `/dev/input/event10`. Overrides `KEYBOARD_NAME` if both are set. |
+| `KEYS`                         | **Yes**        | Comma-separated keys to debounce, using `KEY_*` names from `evtest` (example: `KEY_K,KEY_L,KEY_ENTER`). Ignored if `DEBOUNCE_ALL_KEYS` is set. |
+| `DEBOUNCE_ALL_KEYS`            | No             | `true` / `false` — debounce all keyboard keys automatically. Modifiers always excluded. Default: `false`. |
+| `THRESHOLD_MS`                 | No             | Base debounce window in ms. Any re-press within this window of the last release is suppressed. Default: `30`. |
+| `SHORT_HOLD_THRESHOLD_MS`      | No             | Hold below this (but above `MICRO_HOLD_THRESHOLD_MS`) is classified as *Short*, arming the extended window. Default: `70`. |
+| `EXTENDED_THRESHOLD_MS`        | No             | Debounce window after a *Short* hold, in ms. Default: `100`. |
+| `MICRO_HOLD_THRESHOLD_MS`      | No             | Hold below this is classified as *Micro* (hardware ghost contact), arming the micro-extended window. Default: `20`. |
+| `MICRO_EXTENDED_THRESHOLD_MS`  | No             | Debounce window after a *Micro* hold, in ms. Default: `150`. |
+| `LOG_FORWARD`                  | No             | `true` / `false` — log every forwarded event immediately. Default: `false`. |
+| `TRACK_DB`                     | No             | Path to an SQLite file for passive key-health recording. Created automatically. Disabled by default. |
 
-Refer to `debouncer.conf.example` for a fully commented template including all fields above.
+See [`docs/debounce-algorithm.md`](docs/debounce-algorithm.md) for a detailed explanation
+of how the tiered debounce mechanism works, including worked examples, the rationale
+behind each default value, and a threshold tuning guide.
 
 ## How the health tracker works
 
