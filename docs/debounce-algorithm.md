@@ -151,9 +151,9 @@ mechanical switch:
 
 Each key's gap is measured independently — `gap = now − last_up` for that
 specific key, not across different keys. Observed bounce gaps after normal
-holds were 7–20 ms. A deliberate same-key re-press (e.g. "aa") at any sane
-typing speed produces gaps of 150 ms or more. 30 ms sits safely above the
-observed bounce range and far below any conscious re-press of the same key.
+holds were 7–20 ms. Measured deliberate same-key re-press gaps in fast typing
+are ~50–70 ms. 30 ms sits safely above the observed bounce range and well
+below the minimum deliberate re-press gap.
 
 ### `SHORT_HOLD_THRESHOLD_MS = 70`
 
@@ -167,8 +167,14 @@ Normal tier.
 ### `EXTENDED_THRESHOLD_MS = 100`
 
 After a Short hold, bounces were observed at 67–70 ms — just above the old 60 ms
-extended threshold. 100 ms catches this range while remaining well below the
-~170 ms gap for intentional same-key re-presses at 120 WPM.
+extended threshold. 100 ms catches this range.
+
+> **Caveat**: if a deliberate press has a hold of 20–70 ms (Short tier) and
+> the same key is immediately re-pressed with a gap under 100 ms, that re-press
+> will be falsely suppressed. Measured fast-typing same-key gaps are ~50–70 ms,
+> so this overlap is real. If you observe false positives on rapid same-key
+> repetition, lower `SHORT_HOLD_THRESHOLD_MS` (e.g. to 50 ms) so that more
+> deliberate presses fall into the Normal tier.
 
 ### `MICRO_HOLD_THRESHOLD_MS = 20`
 
@@ -179,11 +185,11 @@ class of chatter.
 ### `MICRO_EXTENDED_THRESHOLD_MS = 150`
 
 After a Micro hold, bounces were observed at 79–99 ms. 150 ms catches this range.
-The safety margin for intentional double-letter typing is comfortable: a conscious
-same-key re-press ("ee" in "seen") at 120 WPM has a gap of ~160–220 ms, and
-crucially, the deliberate first press will have a *Normal* hold (≥ 70 ms), so the
-150 ms threshold never even arms in normal typing. The Micro threshold only arms
-after a ghost contact, not after a real press.
+This threshold is safe despite measured fast-typing same-key gaps of ~50–70 ms
+because it can only arm after a **Micro hold** (< 20 ms) — and no deliberate
+press produces a hold that short. A real press always has a Normal hold (≥ 70 ms),
+so the next threshold is the base 30 ms, not 150 ms. The Micro threshold only
+ever arms after a hardware ghost contact, never after intentional typing.
 
 ---
 
