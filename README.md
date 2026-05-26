@@ -50,6 +50,101 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
    > Alternatively, create a udev rule that gives the `input` group read/write
    > access to `/dev/input/event*`.
 
+## Running as a systemd service
+
+Running the debouncer as a systemd service means it starts automatically at boot,
+restarts on failure, and its output goes to the journal — no terminal session needed.
+
+A ready-to-use service unit is included at [`keyboard-debouncer.service`](keyboard-debouncer.service).
+
+### 1 — Build and install the binary
+
+```bash
+cargo build --release
+sudo cp target/release/keyboard-debouncer /usr/local/bin/
+sudo chmod 755 /usr/local/bin/keyboard-debouncer
+```
+
+### 2 — Install the config
+
+```bash
+sudo cp debouncer.conf.example /etc/debouncer.conf
+sudo nano /etc/debouncer.conf   # set KEYBOARD_NAME and KEYS at minimum
+```
+
+### 3 — Create a dedicated system user
+
+The service runs as an unprivileged `kbd-debouncer` user instead of root.
+This user only needs access to `/dev/input/event*` (via the `input` group) and
+`/dev/uinput` (via a udev rule below).
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
+    --groups input --comment "keyboard-debouncer daemon" kbd-debouncer
+```
+
+### 4 — Grant access to `/dev/uinput`
+
+The `input` group covers reading real devices, but `/dev/uinput` (used to create
+the virtual keyboard) is typically owned by `root`. Add a udev rule to fix this:
+
+```bash
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' \
+    | sudo tee /etc/udev/rules.d/99-uinput.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+> **Note**: If `/dev/uinput` is not in the `input` group even after the udev rule
+> (some distributions handle this differently), you can add `kbd-debouncer` to the
+> group that owns it, or fall back to running the service as `root` by removing the
+> `User=` and `Group=` lines from the unit file.
+
+### 5 — Install and enable the service
+
+```bash
+sudo cp keyboard-debouncer.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now keyboard-debouncer
+```
+
+### 6 — Verify it's running
+
+```bash
+sudo systemctl status keyboard-debouncer
+```
+
+### Viewing logs
+
+```bash
+# Stream live output
+journalctl -u keyboard-debouncer -f
+
+# Show all logs since last boot
+journalctl -u keyboard-debouncer -b
+```
+
+### Common operations
+
+| Task | Command |
+|------|---------|
+| Restart after a config change | `sudo systemctl restart keyboard-debouncer` |
+| Stop the daemon | `sudo systemctl stop keyboard-debouncer` |
+| Disable autostart | `sudo systemctl disable keyboard-debouncer` |
+| Check status | `sudo systemctl status keyboard-debouncer` |
+
+### Health tracker database path
+
+If you enable `TRACK_DB` in your config, use the path the service pre-creates for you:
+
+```
+TRACK_DB=/var/lib/keyboard-debouncer/keys.db
+```
+
+The `StateDirectory=keyboard-debouncer` directive in the unit file ensures
+`/var/lib/keyboard-debouncer/` is created and owned by `kbd-debouncer` on first start.
+
+---
+
 ## Configuration (`debouncer.conf`)
 
 | Field                          | Required?      | Description |

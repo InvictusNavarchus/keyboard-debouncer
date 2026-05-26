@@ -1,0 +1,52 @@
+[Unit]
+Description=Keyboard Debouncer — evdev chatter filter
+# Start after the input subsystem and uinput are available.
+# graphical-session-pre ensures the virtual device is ready before any
+# display server grabs the keyboard.
+After=local-fs.target systemd-udev-settle.service
+# If the keyboard is a USB device that may not be present at boot, the
+# daemon's built-in reconnection loop handles it — no need for BindsTo.
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/keyboard-debouncer --config /etc/debouncer.conf
+
+# ── Privilege model ────────────────────────────────────────────────────────────
+# Run as a dedicated system user that belongs to the `input` group so we can
+# open /dev/input/event* without root.  The `uinput` group (or a udev rule)
+# grants write access to /dev/uinput for the virtual device.
+# See the README for instructions on creating this user.
+User=kbd-debouncer
+Group=input
+SupplementaryGroups=input
+
+# ── Runtime directory for the health-tracker database ─────────────────────────
+# Creates /var/lib/keyboard-debouncer/ owned by the service user on first start.
+StateDirectory=keyboard-debouncer
+StateDirectoryMode=0750
+
+# ── Restart policy ────────────────────────────────────────────────────────────
+# Restart on failure (e.g. fatal config error after a config change).
+# The daemon's internal loop already handles normal disconnects, so crashes
+# are the only case where systemd needs to intervene.
+Restart=on-failure
+RestartSec=2s
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# stdout/stderr go to the journal automatically; query with:
+#   journalctl -u keyboard-debouncer -f
+StandardOutput=journal
+StandardError=journal
+
+# ── Hardening (optional but recommended) ──────────────────────────────────────
+# Uncomment the lines below to tighten the sandbox after verifying the service
+# works correctly on your system.
+#PrivateTmp=true
+#ProtectSystem=strict
+#ProtectHome=true
+#NoNewPrivileges=true
+#RestrictNamespaces=true
+
+[Install]
+# Start automatically at boot in multi-user (non-graphical) and graphical targets.
+WantedBy=multi-user.target
