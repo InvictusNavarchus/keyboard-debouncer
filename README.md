@@ -11,11 +11,9 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 - **Tiered extended debounce** – classifies every forwarded keypress by its hold duration
   into one of three tiers, each arming a progressively stricter debounce window for the
   next cycle:
-  - *Micro* (`< MICRO_HOLD_THRESHOLD_MS`, default 20 ms) — hardware ghost contact; arms a
-    150 ms lockout.
-  - *Short* (`< SHORT_HOLD_THRESHOLD_MS`, default 70 ms) — suspicious partial contact; arms
-    a 100 ms lockout.
-  - *Normal* (≥ 70 ms) — legitimate press; uses the base threshold.
+  - *Micro* (`< MICRO_HOLD_THRESHOLD_MS`, default 20 ms) — hardware ghost contact; unambiguously chatter. Arms a 150 ms lockout.
+  - *Short* (`< SHORT_HOLD_THRESHOLD_MS`, default 70 ms) — potentially suspicious hold. **Requires per-user calibration**: fast typists can produce holds in this range legitimately, causing false positives on rapid same-key repetition. Arms a 100 ms lockout.
+  - *Normal* (≥ `SHORT_HOLD_THRESHOLD_MS`) — uses the base threshold.
 - **Debounce all keys** (optional) – when enabled, all keys are debounced automatically
   instead of only a curated list. Modifier keys and controls (Shift, Ctrl, Alt, Meta,
   CapsLock, etc.) are intelligently excluded since they don't chatter and have different
@@ -61,7 +59,7 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 | `KEYS`                         | **Yes**        | Comma-separated keys to debounce, using `KEY_*` names from `evtest` (example: `KEY_K,KEY_L,KEY_ENTER`). Ignored if `DEBOUNCE_ALL_KEYS` is set. |
 | `DEBOUNCE_ALL_KEYS`            | No             | `true` / `false` — debounce all keyboard keys automatically. Modifiers always excluded. Default: `false`. |
 | `THRESHOLD_MS`                 | No             | Base debounce window in ms. Any re-press within this window of the last release is suppressed. Default: `30`. |
-| `SHORT_HOLD_THRESHOLD_MS`      | No             | Hold below this (but above `MICRO_HOLD_THRESHOLD_MS`) is classified as *Short*, arming the extended window. Default: `70`. |
+| `SHORT_HOLD_THRESHOLD_MS`      | No             | Hold below this (but above `MICRO_HOLD_THRESHOLD_MS`) arms the extended window. Default: `70`. **Most calibration-sensitive parameter** — fast typists may produce holds in this range legitimately; lower toward `MICRO_HOLD_THRESHOLD_MS` if you see false positives on fast same-key presses. |
 | `EXTENDED_THRESHOLD_MS`        | No             | Debounce window after a *Short* hold, in ms. Default: `100`. |
 | `MICRO_HOLD_THRESHOLD_MS`      | No             | Hold below this is classified as *Micro* (hardware ghost contact), arming the micro-extended window. Default: `20`. |
 | `MICRO_EXTENDED_THRESHOLD_MS`  | No             | Debounce window after a *Micro* hold, in ms. Default: `150`. |
