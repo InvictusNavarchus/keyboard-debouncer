@@ -13,19 +13,30 @@ make/break events that look to the OS like the key was pressed many times in
 quick succession. The debouncer's job is to distinguish hardware chatter from
 legitimate re-presses.
 
-The challenge is that these two things look similar at the event-stream level:
+The challenge is that these two things can look very similar at the event-stream
+level. A micro-hold bounce is easy to distinguish:
 
 ```
-Bounce:                          Intentional double-letter ("ee"):
+Micro-hold bounce:               Intentional double-letter ("ee"):
   DN(E)                            DN(E)
-  UP(E)  [hold: 7ms]               UP(E)  [hold: ~100ms]
-  DN(E)  [gap: 82ms]               DN(E)  [gap: ~170ms]
+  UP(E)  [hold: 7ms]               UP(E)  [hold: ~40-60ms]
+  DN(E)  [gap: 82ms]               DN(E)  [gap: ~30-50ms UP→DN]
+```
+
+But the picture can be genuinely ambiguous for medium-hold bounces:
+
+```
+Medium-hold bounce:              Fast same-key re-press:
+  DN(E)                            DN(E)
+  UP(E)  [hold: 60ms]              UP(E)  [hold: ~40ms]
+  DN(E)  [gap: 70ms]               DN(E)  [gap: ~30ms UP→DN]
 ```
 
 A naive time-window filter ("suppress any re-press within X ms") has to thread a
 needle: large enough to catch bounces, small enough not to swallow real typing.
-This gets harder when hardware degrades and produces bounces at progressively
-longer gaps.
+Note that `gap` here always refers to the **UP→DN** interval (release-to-next-press),
+not the DN→DN interval (press-to-press) that a typist naturally perceives. They
+relate as: `UP→DN = DN→DN − hold`.
 
 ---
 
@@ -36,13 +47,18 @@ of the preceding press is equally informative:
 
 | Prior hold | What it means |
 |---|---|
-| < 20 ms | Hardware ghost — no human holds a key that briefly. Pure chatter. |
-| 20–70 ms | Suspicious partial contact. Real presses rarely feel this short. |
-| > 70 ms | Normal deliberate press. |
+| < 20 ms | Hardware ghost — no human holds a key that briefly. **Reliably** chatter. |
+| 20–SHORT_HOLD ms | Suspicious range — could be partial contact *or* fast typing. Context-dependent. |
+| ≥ SHORT_HOLD ms | Normal deliberate press. |
 
 A 82 ms re-press gap in isolation is ambiguous. A 82 ms gap *after a 7 ms hold*
 is almost certainly a bounce — the switch made ghost contact for 7 ms, broke, then
-re-engaged 82 ms later. Combining both signals collapses the ambiguity.
+re-engaged 82 ms later. This is the **Micro** case, and it is unambiguous.
+
+The **Short** case (hold in the 20–SHORT_HOLD range) is less clear-cut: fast typists
+can produce holds in this range legitimately. Whether a particular SHORT_HOLD value
+creates false positives depends on the typist's rhythm and must be calibrated
+empirically using the logs.
 
 ---
 
@@ -163,12 +179,19 @@ threshold of 30 ms sits safely above this range for Normal-tier presses.
 
 ### `SHORT_HOLD_THRESHOLD_MS = 70`
 
-Two failure modes were observed:
+Two failure modes were observed in the hardware data:
 - Ghost contacts with holds of 3–11 ms (clearly hardware chatter)
 - Partial-contact presses with holds of 59–63 ms (switch partially engaging)
 
-70 ms catches both while keeping genuine fast presses (typically ≥ 80 ms) in the
-Normal tier.
+70 ms catches both. **However, this default is not universally safe.** Real-world
+testing shows fast typists can produce deliberate holds of 38–62 ms — well within
+the Short tier — leading to false positives on rapid same-key presses. The Short
+tier threshold is the parameter most likely to need per-user calibration.
+
+If you observe false positives on fast same-key repetition, lower
+`SHORT_HOLD_THRESHOLD_MS` toward `MICRO_HOLD_THRESHOLD_MS`. At the extreme,
+setting them equal effectively disables the Short tier, leaving only Micro
+protection and the base threshold.
 
 ### `EXTENDED_THRESHOLD_MS = 100`
 
@@ -193,11 +216,11 @@ class of chatter.
 ### `MICRO_EXTENDED_THRESHOLD_MS = 150`
 
 After a Micro hold, bounces were observed at 79–99 ms. 150 ms catches this range.
-This threshold is safe despite measured fast-typing same-key gaps of ~50–70 ms
-because it can only arm after a **Micro hold** (< 20 ms) — and no deliberate
-press produces a hold that short. A real press always has a Normal hold (≥ 70 ms),
-so the next threshold is the base 30 ms, not 150 ms. The Micro threshold only
-ever arms after a hardware ghost contact, never after intentional typing.
+This threshold is safe because it only arms after a **Micro hold** (< 20 ms) —
+and no deliberate press, however fast, produces a hold under 20 ms. The 20 ms
+boundary is the reliable dividing line between hardware ghost contacts and any
+human keypress. Once a Micro hold is classified, the 150 ms lockout follows
+regardless of the typist's speed.
 
 ---
 
@@ -246,16 +269,29 @@ sailed through.
 
 ### Example 3 — Intentional double letter ("ee" in "seen")
 
+The outcome depends entirely on how fast the typist presses:
+
+**Slow/normal hold (≥ SHORT_HOLD_THRESHOLD_MS):**
 ```
-  DN(E)  hold=~100ms                  → forward
-  UP(E)  hold=100ms ≥ short(70ms)    → last_hold_tier = Normal
-  DN(E)  gap=~170ms                  → threshold=30ms (Normal tier)
-         170ms ≥ 30ms                → forward ✓
+  DN(E)  hold=80ms                   → forward
+  UP(E)  hold(80ms) ≥ short(70ms)   → last_hold_tier = Normal
+  DN(E)  gap=40ms                    → threshold=30ms (Normal tier)
+         40ms ≥ 30ms                 → forward ✓
 ```
 
-The deliberate hold (100 ms) puts the tier in Normal, so the next press only
-needs to clear the base 30 ms threshold — which a conscious re-press at any
-sane typing speed will do with room to spare.
+**Fast hold (< SHORT_HOLD_THRESHOLD_MS, e.g. 40ms):**
+```
+  DN(E)  hold=40ms                   → forward
+  UP(E)  hold(40ms) < short(70ms)   → last_hold_tier = Short
+  DN(E)  gap=30ms                    → threshold=100ms (Extended tier)
+         30ms < 100ms                → SUPPRESS ❌  (false positive)
+```
+
+Fast typists who produce holds below `SHORT_HOLD_THRESHOLD_MS` will see false
+positives on rapid same-key repetition. Lowering `SHORT_HOLD_THRESHOLD_MS`
+toward `MICRO_HOLD_THRESHOLD_MS` trades away medium-hold bounce protection
+in exchange for eliminating these false positives. Which trade-off is correct
+depends on whether your hardware actually exhibits the medium-hold bounce pattern.
 
 ---
 
