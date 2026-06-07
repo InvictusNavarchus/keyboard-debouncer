@@ -23,6 +23,41 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
   switches that are starting to fail, **before** the chatter becomes noticeable.
 - **Zero‑configuration discovery** – set your keyboard name once and the app auto finds the correct `/dev/input/eventX`
 
+## Prerequisites
+
+Before building this project, you need to ensure that your system has a C compiler and development tools installed (required by some of our underlying dependencies like `evdev` and `libsqlite3-sys`).
+
+### Linux
+
+Install the standard development toolchain for your distribution:
+
+- **Ubuntu / Debian / Pop!_OS:**
+  ```bash
+  sudo apt update && sudo apt install build-essential
+  ```
+
+- **Fedora / RHEL (Fedora 41+ / DNF5):**
+  ```bash
+  sudo dnf group install development-tools
+  ```
+
+- **Arch Linux / Manjaro:**
+  ```bash
+  sudo pacman -S base-devel
+  ```
+
+### macOS
+
+Install the Xcode Command Line Tools:
+
+```bash
+xcode-select --install
+```
+
+### Windows
+
+If building via WSL, follow the Linux instructions inside your terminal. If building natively, you will need the **Desktop development with C++** workload installed via the [Visual Studio Installer](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+
 ## How to use
 
 1. **Find your keyboard** using `evtest`, or `libinput list-devices`, or `grep -r '' /sys/class/input/event*/device/name`
