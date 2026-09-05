@@ -14,9 +14,11 @@ User=kbd-debouncer
 Group=input
 
 # ── Runtime directory for the health-tracker database ─────────────────────────
-# Creates /var/lib/keyboard-debouncer/ owned by the service user on first start.
+# Creates /var/lib/keyboard-debouncer/ owned by kbd-debouncer on first start.
+# Restricted to 0700 with UMask 0077 so keylog DB is only accessible by service and root.
 StateDirectory=keyboard-debouncer
-StateDirectoryMode=0750
+StateDirectoryMode=0700
+UMask=0077
 
 # ── Restart policy ────────────────────────────────────────────────────────────
 # Restart on failure (e.g. fatal config error after a config change).
