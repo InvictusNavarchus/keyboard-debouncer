@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
+#
+# keyboard-debouncer system installer
+#
+# Note on privileges:
+# This installer requires root (sudo) ONCE to provision system-level assets:
+#   - Installing the binary to /usr/local/bin/
+#   - Registering the 'uinput' kernel module at boot (/etc/modules-load.d/)
+#   - Creating the dedicated unprivileged system user ('kbd-debouncer')
+#   - Setting udev device permissions for /dev/uinput
+#   - Installing the systemd service to /etc/systemd/system/
+#
+# Once installed, the daemon itself runs strictly UNPRIVILEGED as 'kbd-debouncer'
+# with zero root access, sandboxed by systemd directives.
+#
 set -euo pipefail
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo "Error: This script must be run with root privileges (e.g. sudo ./install.sh)" >&2
+    echo "Error: Installation requires root privileges to configure system files, udev rules," >&2
+    echo "       and the dedicated 'kbd-debouncer' unprivileged system user." >&2
+    echo "       Please run: sudo ./install.sh" >&2
     exit 1
 fi
 
