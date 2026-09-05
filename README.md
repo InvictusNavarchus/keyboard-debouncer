@@ -71,11 +71,13 @@ If building via WSL, follow the Linux instructions inside your terminal. If buil
    `DEVICE_PATH`) and the list of `KEYS`. All other fields have sensible
    defaults. See the table below.
 5. **Launch** (root or input‑group member required):
-   ```
+   ```bash
    sudo ./target/release/keyboard-debouncer
+   # or specify an explicit config path:
+   sudo ./target/release/keyboard-debouncer --config /path/to/debouncer.conf
    ```
-   If you place the config at `/etc/debouncer.conf`, the daemon will also find
-   it without an explicit argument.
+   If no path is specified, the daemon looks for `debouncer.conf` in the current
+   directory, then `/etc/debouncer.conf`. Supports `-c` or `--config <PATH>` flags.
 
    > **Tip**: Add your user to the `input` group so you can run the daemon
    > without `sudo` after a one‑time setup:
@@ -92,33 +94,73 @@ restarts on failure, and its output goes to the journal — no terminal session 
 
 A ready-to-use service unit is included at [`keyboard-debouncer.service`](keyboard-debouncer.service).
 
-### 1 — Build and install the binary
+### Quick installation (Automated)
+
+You can install everything in one command using the provided install script:
 
 ```bash
 cargo build --release
-sudo cp target/release/keyboard-debouncer /usr/local/bin/
-sudo chmod 755 /usr/local/bin/keyboard-debouncer
+sudo ./install.sh
 ```
 
-### 2 — Install the config
+The script automatically:
+- Installs the release binary to `/usr/local/bin/keyboard-debouncer`
+- Ensures the `uinput` kernel module loads at boot (`/etc/modules-load.d/uinput.conf`)
+- Creates the unprivileged system user `kbd-debouncer` in the `input` group
+- Configures udev permissions for `/dev/uinput`
+- Copies the template configuration to `/etc/debouncer.conf` (without overwriting existing configs)
+- Installs and reloads the systemd service
+
+After installation:
+1. Edit `/etc/debouncer.conf` to set your `KEYBOARD_NAME` and target `KEYS`.
+2. Enable and start the service:
+   ```bash
+   sudo systemctl enable --now keyboard-debouncer
+   ```
+3. Check daemon status:
+   ```bash
+   sudo systemctl status keyboard-debouncer
+   ```
+
+---
+
+### Manual installation (Step-by-step)
+
+If you prefer setting up the components manually:
+
+#### 1 — Build and install the binary
+
+```bash
+cargo build --release
+sudo install -m 755 target/release/keyboard-debouncer /usr/local/bin/
+```
+
+#### 2 — Install the config
 
 ```bash
 sudo cp debouncer.conf.example /etc/debouncer.conf
 sudo nano /etc/debouncer.conf   # set KEYBOARD_NAME and KEYS at minimum
 ```
 
-### 3 — Create a dedicated system user
+#### 3 — Ensure `uinput` kernel module loads on boot
+
+```bash
+echo "uinput" | sudo tee /etc/modules-load.d/uinput.conf
+sudo modprobe uinput
+```
+
+#### 4 — Create a dedicated system user
 
 The service runs as an unprivileged `kbd-debouncer` user instead of root.
 This user only needs access to `/dev/input/event*` (via the `input` group) and
-`/dev/uinput` (via a udev rule below).
+`/dev/uinput` (via the udev rule below).
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
     --groups input --comment "keyboard-debouncer daemon" kbd-debouncer
 ```
 
-### 4 — Grant access to `/dev/uinput`
+#### 5 — Grant access to `/dev/uinput`
 
 The `input` group covers reading real devices, but `/dev/uinput` (used to create
 the virtual keyboard) is typically owned by `root`. Add a udev rule to fix this:
@@ -134,15 +176,15 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 > group that owns it, or fall back to running the service as `root` by removing the
 > `User=` and `Group=` lines from the unit file.
 
-### 5 — Install and enable the service
+#### 6 — Install and enable the service
 
 ```bash
-sudo cp keyboard-debouncer.service /etc/systemd/system/
+sudo install -m 644 keyboard-debouncer.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now keyboard-debouncer
 ```
 
-### 6 — Verify it's running
+#### 7 — Verify it's running
 
 ```bash
 sudo systemctl status keyboard-debouncer
