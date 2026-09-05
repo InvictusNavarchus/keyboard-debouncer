@@ -80,9 +80,19 @@ if command -v udevadm >/dev/null 2>&1; then
     udevadm trigger 2>/dev/null || true
 fi
 
+if [ -d /var/lib/keyboard-debouncer ]; then
+    echo "==> Securing existing /var/lib/keyboard-debouncer permissions..."
+    chown -R kbd-debouncer:input /var/lib/keyboard-debouncer
+    chmod 700 /var/lib/keyboard-debouncer
+    chmod -R go-rwx /var/lib/keyboard-debouncer/* 2>/dev/null || true
+fi
+
 echo "==> Installing configuration..."
 if [ ! -f /etc/debouncer.conf ]; then
-    if [ -f debouncer.conf.example ]; then
+    if [ -f debouncer.conf ]; then
+        install -D -m 644 debouncer.conf /etc/debouncer.conf
+        echo "    Copied existing debouncer.conf to /etc/debouncer.conf."
+    elif [ -f debouncer.conf.example ]; then
         install -D -m 644 debouncer.conf.example /etc/debouncer.conf
         echo "    Created /etc/debouncer.conf from example. EDIT THIS FILE with your keyboard details!"
     fi
