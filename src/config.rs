@@ -85,32 +85,83 @@ pub fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::er
     }
 }
 
-pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
-    let mut args = env::args();
-    let conf_path = if let Some(arg) = args.nth(1) {
-        if arg == "--help" || arg == "-h" {
-            println!(
-                "Usage: keyboard-debouncer [CONFIG_PATH]\n\
-                 \n\
-                 If no config path is provided, looks for `debouncer.conf` in the current directory, \n\
-                 or `/etc/debouncer.conf`."
-            );
-            std::process::exit(0);
+#[derive(Debug, PartialEq, Eq)]
+pub enum CliAction {
+    Help,
+    Run(Option<PathBuf>),
+}
+
+pub fn parse_cli_args<I, T>(args: I) -> Result<CliAction, Box<dyn std::error::Error>>
+where
+    I: IntoIterator<Item = T>,
+    T: AsRef<str>,
+{
+    let mut explicit_path: Option<PathBuf> = None;
+    let mut iter = args.into_iter();
+
+    while let Some(arg) = iter.next() {
+        let s = arg.as_ref();
+        match s {
+            "-h" | "--help" => return Ok(CliAction::Help),
+            "-c" | "--config" => {
+                let val = iter
+                    .next()
+                    .ok_or_else(|| format!("Option '{s}' requires a path argument"))?;
+                if explicit_path.is_some() {
+                    return Err("Multiple configuration files specified".into());
+                }
+                explicit_path = Some(PathBuf::from(val.as_ref()));
+            }
+            s if s.starts_with('-') => {
+                return Err(format!("Unknown option: '{s}'. Use --help for usage.").into());
+            }
+            _ => {
+                if explicit_path.is_some() {
+                    return Err("Multiple configuration files specified".into());
+                }
+                explicit_path = Some(PathBuf::from(s));
+            }
         }
-        PathBuf::from(arg)
+    }
+
+    Ok(CliAction::Run(explicit_path))
+}
+
+fn resolve_config_path(explicit_path: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(path) = explicit_path {
+        Ok(path)
     } else {
         let local = PathBuf::from("debouncer.conf");
         let etc = PathBuf::from("/etc/debouncer.conf");
         if local.exists() {
-            local
+            Ok(local)
         } else if etc.exists() {
-            etc
+            Ok(etc)
         } else {
-            return Err(
+            Err(
                 "Could not find debouncer.conf in current directory or /etc/. Please create one."
                     .into(),
-            );
+            )
         }
+    }
+}
+
+pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
+    let conf_path = match parse_cli_args(env::args().skip(1))? {
+        CliAction::Help => {
+            println!(
+                "Usage: keyboard-debouncer [OPTIONS] [CONFIG_PATH]\n\
+                 \n\
+                 Options:\n\
+                   -c, --config <PATH>  Path to configuration file\n\
+                   -h, --help           Print help information\n\
+                 \n\
+                 If no config path is provided, looks for `debouncer.conf` in the current directory,\n\
+                 or `/etc/debouncer.conf`."
+            );
+            std::process::exit(0);
+        }
+        CliAction::Run(explicit_path) => resolve_config_path(explicit_path)?,
     };
 
     let conf = load_conf(&conf_path);
@@ -197,3 +248,58 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
         track_db,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_cli_args_empty() {
+        let res = parse_cli_args(Vec::<&str>::new()).unwrap();
+        assert_eq!(res, CliAction::Run(None));
+    }
+
+    #[test]
+    fn test_parse_cli_args_positional() {
+        let res = parse_cli_args(vec!["/custom/path.conf"]).unwrap();
+        assert_eq!(res, CliAction::Run(Some(PathBuf::from("/custom/path.conf"))));
+    }
+
+    #[test]
+    fn test_parse_cli_args_long_flag() {
+        let res = parse_cli_args(vec!["--config", "/etc/debouncer.conf"]).unwrap();
+        assert_eq!(res, CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf"))));
+    }
+
+    #[test]
+    fn test_parse_cli_args_short_flag() {
+        let res = parse_cli_args(vec!["-c", "/etc/debouncer.conf"]).unwrap();
+        assert_eq!(res, CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf"))));
+    }
+
+    #[test]
+    fn test_parse_cli_args_help() {
+        assert_eq!(parse_cli_args(vec!["-h"]).unwrap(), CliAction::Help);
+        assert_eq!(parse_cli_args(vec!["--help"]).unwrap(), CliAction::Help);
+    }
+
+    #[test]
+    fn test_parse_cli_args_missing_flag_value() {
+        assert!(parse_cli_args(vec!["--config"]).is_err());
+        assert!(parse_cli_args(vec!["-c"]).is_err());
+    }
+
+    #[test]
+    fn test_parse_cli_args_unknown_flag() {
+        assert!(parse_cli_args(vec!["--unknown"]).is_err());
+        assert!(parse_cli_args(vec!["-u"]).is_err());
+    }
+
+    #[test]
+    fn test_parse_cli_args_multiple_paths() {
+        assert!(parse_cli_args(vec!["conf1.conf", "conf2.conf"]).is_err());
+        assert!(parse_cli_args(vec!["--config", "conf1.conf", "conf2.conf"]).is_err());
+        assert!(parse_cli_args(vec!["conf1.conf", "-c", "conf2.conf"]).is_err());
+    }
+}
+
