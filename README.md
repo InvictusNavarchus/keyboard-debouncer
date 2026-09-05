@@ -94,6 +94,15 @@ restarts on failure, and its output goes to the journal — no terminal session 
 
 A ready-to-use service unit is included at [`keyboard-debouncer.service`](keyboard-debouncer.service).
 
+> [!NOTE]
+> **Privilege & Security Model (Why `sudo` is needed for installation):**  
+> Intercepting physical keystrokes (`/dev/input/event*`) and injecting virtual keys (`/dev/uinput`)
+> are sensitive kernel interfaces restricted to root by default to prevent unauthorized keylogging or synthetic typing.
+>
+> Rather than running the daemon as root 24/7, this architecture implements **runtime privilege separation**:
+> the daemon runs strictly **unprivileged** as `kbd-debouncer` with no root access and strict filesystem sandboxing (`ProtectSystem=strict`, `ProtectHome=true`, `NoNewPrivileges=true`).
+> `sudo` is required **only once during installation** to provision this dedicated user, configure hardware udev permissions, set up boot-time kernel module loading, and register the systemd unit.
+
 ### Quick installation (Automated)
 
 You can install everything in one command using the provided install script:
