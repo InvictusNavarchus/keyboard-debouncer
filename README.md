@@ -227,7 +227,17 @@ TRACK_DB=/var/lib/keyboard-debouncer/keys.db
 ```
 
 The `StateDirectory=keyboard-debouncer` directive in the unit file ensures
-`/var/lib/keyboard-debouncer/` is created and owned by `kbd-debouncer` on first start.
+`/var/lib/keyboard-debouncer/` is created and owned by `kbd-debouncer` with `0700`
+permissions (`UMask=0077`).
+
+> [!TIP]
+> **Database Privacy & Inspection:**  
+> Because the keystroke history is sensitive, `/var/lib/keyboard-debouncer/` is restricted
+> to mode `0700` (`drwx------`). Non-root desktop applications and users cannot read the database.
+> To query your keystroke data, run `sqlite3` as root:
+> ```bash
+> sudo sqlite3 /var/lib/keyboard-debouncer/keys.db "SELECT * FROM key_events ORDER BY timestamp_ms DESC LIMIT 10;"
+> ```
 
 ---
 
