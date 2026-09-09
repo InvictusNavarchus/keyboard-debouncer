@@ -102,13 +102,34 @@ fi
 
 echo "==> Installing systemd service..."
 install -D -m 644 keyboard-debouncer.service /etc/systemd/system/keyboard-debouncer.service
+
+SERVICE_WAS_ACTIVE=0
 if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet keyboard-debouncer; then
+        SERVICE_WAS_ACTIVE=1
+    fi
     systemctl daemon-reload
 fi
 
+# The `install` above replaced the inode at /usr/local/bin, but an already-running
+# process keeps executing the old inode, and `daemon-reload` only re-reads unit
+# files — neither picks up the new binary. Without this explicit restart an
+# upgrade reports success while the old code keeps running.
+if [ "$SERVICE_WAS_ACTIVE" -eq 1 ]; then
+    echo "==> Service is running; restarting to activate the new binary..."
+    systemctl restart keyboard-debouncer
+fi
+
 echo ""
-echo "Installation successful!"
-echo "Next steps:"
-echo "  1. Edit your settings: sudo nano /etc/debouncer.conf"
-echo "  2. Enable and start:   sudo systemctl enable --now keyboard-debouncer"
-echo "  3. Check status:       sudo systemctl status keyboard-debouncer"
+if [ "$SERVICE_WAS_ACTIVE" -eq 1 ]; then
+    echo "Upgrade successful — service restarted on the new binary."
+    echo "Verify with:"
+    echo "  keyboard-debouncer --version"
+    echo "  sudo systemctl status keyboard-debouncer"
+else
+    echo "Installation successful!"
+    echo "Next steps:"
+    echo "  1. Edit your settings: sudo nano /etc/debouncer.conf"
+    echo "  2. Enable and start:   sudo systemctl enable --now keyboard-debouncer"
+    echo "  3. Check status:       sudo systemctl status keyboard-debouncer"
+fi
