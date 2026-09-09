@@ -129,7 +129,9 @@ where
     Ok(CliAction::Run(explicit_path))
 }
 
-fn resolve_config_path(explicit_path: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn resolve_config_path(
+    explicit_path: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(path) = explicit_path {
         Ok(path)
     } else {
@@ -269,19 +271,28 @@ mod tests {
     #[test]
     fn test_parse_cli_args_positional() {
         let res = parse_cli_args(vec!["/custom/path.conf"]).unwrap();
-        assert_eq!(res, CliAction::Run(Some(PathBuf::from("/custom/path.conf"))));
+        assert_eq!(
+            res,
+            CliAction::Run(Some(PathBuf::from("/custom/path.conf")))
+        );
     }
 
     #[test]
     fn test_parse_cli_args_long_flag() {
         let res = parse_cli_args(vec!["--config", "/etc/debouncer.conf"]).unwrap();
-        assert_eq!(res, CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf"))));
+        assert_eq!(
+            res,
+            CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf")))
+        );
     }
 
     #[test]
     fn test_parse_cli_args_short_flag() {
         let res = parse_cli_args(vec!["-c", "/etc/debouncer.conf"]).unwrap();
-        assert_eq!(res, CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf"))));
+        assert_eq!(
+            res,
+            CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf")))
+        );
     }
 
     #[test]
@@ -318,4 +329,3 @@ mod tests {
         assert!(parse_cli_args(vec!["conf1.conf", "-c", "conf2.conf"]).is_err());
     }
 }
-
