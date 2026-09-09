@@ -22,6 +22,10 @@ UNIT_PATH=/etc/systemd/system/keyboard-debouncer.service
 CONFIG_PATH=/etc/debouncer.conf
 STATE_DIR=/var/lib/keyboard-debouncer
 DAEMON_USER=kbd-debouncer
+# install.sh stamps the account with this GECOS comment and always has, so it
+# serves as an ownership marker for existing installs too — no new state, no
+# migration.
+DAEMON_USER_COMMENT='keyboard-debouncer daemon'
 
 # Kept in sync by hand with install.sh. Duplicated rather than sourced from a
 # shared file so this script stays standalone — it must work when fetched on its
@@ -163,8 +167,18 @@ elif [ -d "$STATE_DIR" ]; then
 fi
 
 if id -u "$DAEMON_USER" >/dev/null 2>&1; then
-    echo "==> Removing system user '$DAEMON_USER'..."
-    userdel "$DAEMON_USER"
+    # Delete the account only if we are the ones who made it. Sharing a name is
+    # not evidence of ownership, and userdel on someone else's system account is
+    # not something they can undo from the message we print.
+    # cut twice: field 5 is GECOS, whose first comma-separated subfield is the
+    # comment useradd --comment sets; later tools may append empty subfields.
+    actual_comment="$(getent passwd "$DAEMON_USER" | cut -d: -f5 | cut -d, -f1)"
+    if [ "$actual_comment" = "$DAEMON_USER_COMMENT" ]; then
+        echo "==> Removing system user '$DAEMON_USER'..."
+        userdel "$DAEMON_USER"
+    else
+        echo "==> Leaving user '$DAEMON_USER' in place (not created by this installer)."
+    fi
 fi
 
 echo ""
