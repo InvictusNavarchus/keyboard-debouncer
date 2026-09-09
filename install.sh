@@ -13,6 +13,9 @@
 # Once installed, the daemon itself runs strictly UNPRIVILEGED as 'kbd-debouncer'
 # with zero root access, sandboxed by systemd directives.
 #
+# This script installs; it does not build. Run `cargo build --release` as your
+# normal user first.
+#
 set -euo pipefail
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -32,36 +35,10 @@ LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-uinput.rules
 UDEV_RULE_CONTENT='KERNEL=="uinput", GROUP="input", MODE="0660"'
 
 if [ ! -f "target/release/keyboard-debouncer" ]; then
-    echo "==> Release binary not found at target/release/keyboard-debouncer."
-    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-        USER_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
-        CARGO_BIN="$USER_HOME/.cargo/bin"
-        # Probe for cargo as the invoking user with their rustup bin dir on PATH.
-        # Probing as root answers the wrong question: rustup installs per-user, so
-        # root's PATH says nothing about whether $SUDO_USER can build.
-        if sudo -u "$SUDO_USER" env PATH="$CARGO_BIN:$PATH" \
-            sh -c 'command -v cargo' >/dev/null 2>&1; then
-            echo "==> Building release binary as '$SUDO_USER'..."
-            sudo -u "$SUDO_USER" env PATH="$CARGO_BIN:$PATH" cargo build --release
-        fi
-    else
-        # Building here would run cargo as root and leave a root-owned target/,
-        # which breaks every later unprivileged `cargo build` with permission
-        # errors that give no hint the installer caused them.
-        echo "Error: Refusing to build as root — that would leave a root-owned target/." >&2
-        echo "       Build as your normal user first, then re-run the installer:" >&2
-        echo "         cargo build --release" >&2
-        echo "         sudo ./install.sh" >&2
-        exit 1
-    fi
-fi
-
-if [ ! -f "target/release/keyboard-debouncer" ]; then
-    echo "Error: Could not build or locate target/release/keyboard-debouncer." >&2
-    echo "Please build the project first as a regular user:" >&2
-    echo "  cargo build --release" >&2
-    echo "Then re-run the installer:" >&2
-    echo "  sudo ./install.sh" >&2
+    echo "Error: Release binary not found at target/release/keyboard-debouncer." >&2
+    echo "       Build it as your normal user, then re-run the installer:" >&2
+    echo "         cargo build --release" >&2
+    echo "         sudo ./install.sh" >&2
     exit 1
 fi
 
