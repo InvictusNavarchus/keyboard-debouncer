@@ -90,9 +90,11 @@ printf '%s\n' "$UDEV_RULE_CONTENT" > "$UDEV_RULE_PATH"
 # Releases up to v0.1.0 wrote this rule under a name describing the *device*
 # rather than this package, so another package could legitimately own that path.
 # Reclaim it only when its content is byte-identical to what we used to write;
-# a hand-edited or third-party file with the same name is left alone.
+# a hand-edited or third-party file with the same name is left alone. cmp
+# rather than $(cat) because command substitution strips trailing newlines,
+# which would match a file differing from ours by exactly that.
 if [ -f "$LEGACY_UDEV_RULE_PATH" ] \
-    && [ "$(cat "$LEGACY_UDEV_RULE_PATH")" = "$UDEV_RULE_CONTENT" ]; then
+    && printf '%s\n' "$UDEV_RULE_CONTENT" | cmp -s - "$LEGACY_UDEV_RULE_PATH"; then
     rm -f "$LEGACY_UDEV_RULE_PATH"
     echo "    Removed superseded $LEGACY_UDEV_RULE_PATH."
 fi

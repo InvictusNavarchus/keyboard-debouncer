@@ -116,9 +116,11 @@ echo "==> Removing udev rule..."
 rm -f "$UDEV_RULE_PATH"
 # Releases up to v0.1.0 used a device-named rule file that we do not own. Remove
 # it only when it is byte-identical to what those releases wrote, so a
-# hand-edited or third-party file of the same name survives.
+# hand-edited or third-party file of the same name survives. cmp rather than
+# $(cat) because command substitution strips trailing newlines, which would
+# match a file differing from ours by exactly that.
 if [ -f "$LEGACY_UDEV_RULE_PATH" ] \
-    && [ "$(cat "$LEGACY_UDEV_RULE_PATH")" = "$UDEV_RULE_CONTENT" ]; then
+    && printf '%s\n' "$UDEV_RULE_CONTENT" | cmp -s - "$LEGACY_UDEV_RULE_PATH"; then
     rm -f "$LEGACY_UDEV_RULE_PATH"
 fi
 if command -v udevadm >/dev/null 2>&1; then
