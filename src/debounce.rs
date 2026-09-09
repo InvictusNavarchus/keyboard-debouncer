@@ -1,6 +1,6 @@
 //! Keyboard debounce logic: state management, decision making, and event filtering.
 
-use evdev::{uinput::VirtualDevice, Device, InputEvent, Key};
+use evdev::{uinput::VirtualDevice, Device, EventSummary, InputEvent, KeyCode};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -69,7 +69,7 @@ enum EventDecision {
 }
 
 /// All mutable debounce state that must be tracked independently for each
-/// target key.  One instance lives in the `HashMap<Key, PerKeyState>` that is
+/// target key.  One instance lives in the `HashMap<KeyCode, PerKeyState>` that is
 /// initialised in `run_filter_loop`.
 pub struct PerKeyState {
     /// Instant of the last UP event (forwarded OR suppressed) for gap measurement.
@@ -141,21 +141,21 @@ fn fmt_hold(last_dn_at: Option<Instant>) -> (Option<Duration>, String) {
 /// Keys that should never be debounced in `debounce_all` mode.
 /// Modifiers, locks, and media controls don't chatter and have
 /// different timing semantics (held-down combos, etc.).
-fn is_modifier_key(key: Key) -> bool {
+fn is_modifier_key(key: KeyCode) -> bool {
     matches!(
         key,
-        Key::KEY_LEFTSHIFT
-            | Key::KEY_RIGHTSHIFT
-            | Key::KEY_LEFTCTRL
-            | Key::KEY_RIGHTCTRL
-            | Key::KEY_LEFTALT
-            | Key::KEY_RIGHTALT
-            | Key::KEY_LEFTMETA
-            | Key::KEY_RIGHTMETA
-            | Key::KEY_CAPSLOCK
-            | Key::KEY_NUMLOCK
-            | Key::KEY_SCROLLLOCK
-            | Key::KEY_FN
+        KeyCode::KEY_LEFTSHIFT
+            | KeyCode::KEY_RIGHTSHIFT
+            | KeyCode::KEY_LEFTCTRL
+            | KeyCode::KEY_RIGHTCTRL
+            | KeyCode::KEY_LEFTALT
+            | KeyCode::KEY_RIGHTALT
+            | KeyCode::KEY_LEFTMETA
+            | KeyCode::KEY_RIGHTMETA
+            | KeyCode::KEY_CAPSLOCK
+            | KeyCode::KEY_NUMLOCK
+            | KeyCode::KEY_SCROLLLOCK
+            | KeyCode::KEY_FN
     )
 }
 
@@ -174,7 +174,7 @@ fn is_modifier_key(key: Key) -> bool {
 pub fn run_filter_loop(
     real: &mut Device,
     virt: &mut VirtualDevice,
-    keys: &[Key],
+    keys: &[KeyCode],
     cfg: &crate::config::DebounceConfig,
     tracker: &crate::tracker::Tracker,
     debounce_all: bool,
@@ -186,15 +186,15 @@ pub fn run_filter_loop(
     let micro_extended_threshold = Duration::from_millis(cfg.micro_extended_threshold_ms);
 
     // Initialise independent debounce state for every target key.
-    let mut key_states: HashMap<Key, PerKeyState> =
+    let mut key_states: HashMap<KeyCode, PerKeyState> =
         keys.iter().map(|&k| (k, PerKeyState::new())).collect();
 
     loop {
         for event in real.fetch_events()? {
             // Determine whether this event belongs to one of the target keys.
             // Non-target keys are forwarded immediately without touching any state.
-            let (target_key, is_target) = match event.kind() {
-                evdev::InputEventKind::Key(k) => {
+            let (target_key, is_target) = match event.destructure() {
+                EventSummary::Key(_, k, _) => {
                     // Lazy-insert for debounce_all mode (skip modifier/control keys)
                     if debounce_all && !is_modifier_key(k) {
                         key_states.entry(k).or_insert_with(PerKeyState::new);
@@ -274,7 +274,7 @@ pub fn run_filter_loop(
 ///   • Forward unconditionally.
 fn process_event(
     event: &InputEvent,
-    key: Key,
+    key: KeyCode,
     threshold: Duration,
     extended_threshold: Duration,
     micro_extended_threshold: Duration,

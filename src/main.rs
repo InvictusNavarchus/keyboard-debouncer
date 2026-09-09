@@ -13,10 +13,7 @@ mod tracker;
 
 use chrono::{Local, Timelike};
 use debounce::run_filter_loop;
-use evdev::{
-    uinput::{VirtualDevice, VirtualDeviceBuilder},
-    Device,
-};
+use evdev::{uinput::VirtualDevice, Device};
 use std::error::Error as StdError;
 use std::{os::unix::io::AsRawFd, time::Duration};
 
@@ -193,7 +190,7 @@ fn events_available(fd: std::os::unix::io::RawFd) -> bool {
 /// We mirror keys, LEDs, and misc event types so the virtual keyboard is
 /// indistinguishable from the physical one to applications.
 fn build_virtual_device(real: &Device) -> Result<VirtualDevice, Box<dyn std::error::Error>> {
-    let mut builder = VirtualDeviceBuilder::new()?.name("keyboard-debouncer");
+    let mut builder = VirtualDevice::builder()?.name("keyboard-debouncer");
 
     // Mirror supported keys (required; without this typing does nothing)
     if let Some(keys) = real.supported_keys() {

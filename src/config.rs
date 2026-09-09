@@ -2,7 +2,7 @@ use crate::debounce::{
     DEFAULT_EXTENDED_THRESHOLD_MS, DEFAULT_MICRO_EXTENDED_THRESHOLD_MS,
     DEFAULT_MICRO_HOLD_THRESHOLD_MS, DEFAULT_SHORT_HOLD_THRESHOLD_MS, DEFAULT_THRESHOLD_MS,
 };
-use evdev::Key;
+use evdev::KeyCode;
 use std::collections::HashMap;
 use std::{env, io, path::PathBuf};
 
@@ -21,7 +21,7 @@ pub struct DebounceConfig {
 pub struct Config {
     pub device_path: PathBuf,
     pub keyboard_name: Option<String>, // Stored for re-resolution on USB re-enumeration
-    pub keys: Vec<Key>,
+    pub keys: Vec<KeyCode>,
     pub debounce: DebounceConfig,
     pub track_db: Option<PathBuf>,
 }
@@ -178,10 +178,10 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
     let keys_raw = conf
         .get("KEYS")
         .ok_or(format!("KEYS is required in {}", conf_path.display()))?;
-    let mut target_keys: Vec<Key> = Vec::new();
+    let mut target_keys: Vec<KeyCode> = Vec::new();
     for name in keys_raw.split(',') {
         let name = name.trim();
-        target_keys.push(name.parse::<Key>().map_err(|_| {
+        target_keys.push(name.parse::<KeyCode>().map_err(|_| {
             format!("Unknown key name: '{name}'. Use evtest format, e.g. KEY_K, KEY_ENTER")
         })?);
     }

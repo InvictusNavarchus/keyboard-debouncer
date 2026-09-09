@@ -1,4 +1,4 @@
-use evdev::Key;
+use evdev::KeyCode;
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug)]
 pub struct TrackEvent {
     pub ts_ms: u64,
-    pub key: Key,
+    pub key: KeyCode,
     pub value: i32,
     pub suppressed: bool,
 }
@@ -137,7 +137,7 @@ impl Tracker {
         Self { sender: Some(tx) }
     }
 
-    pub fn track(&self, key: Key, value: i32, suppressed: bool, now: SystemTime) {
+    pub fn track(&self, key: KeyCode, value: i32, suppressed: bool, now: SystemTime) {
         if let Some(sender) = &self.sender {
             let ts_ms = now
                 .duration_since(UNIX_EPOCH)
