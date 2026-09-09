@@ -237,6 +237,35 @@ sudo systemctl status keyboard-debouncer
 The daemon also logs its version on startup, so `journalctl -u keyboard-debouncer -b`
 tells you which build produced any given run after the fact.
 
+### Uninstalling
+
+```bash
+sudo ./uninstall.sh
+```
+
+Stops and disables the service, then removes the binary, the systemd unit, the
+udev rule, the boot-time module entry, and the `kbd-debouncer` user.
+
+**Your data is kept by default.** `/etc/debouncer.conf` and the tracker database
+in `/var/lib/keyboard-debouncer/` survive, because everything else can be
+recreated by re-running the installer while a hand-tuned config and an
+accumulated chatter history cannot. To delete those too:
+
+```bash
+sudo ./uninstall.sh --purge
+```
+
+`--purge` lists exactly what it will destroy and asks for confirmation first.
+
+Two things it deliberately leaves alone:
+
+- `/etc/modules-load.d/uinput.conf` is removed only if its contents are exactly
+  what the installer wrote. `uinput` is shared infrastructure — other tools may
+  rely on it being force-loaded at boot — so a file you have edited, or one that
+  predates this install, is preserved and reported.
+- The `input` group itself, which is provided by your distribution rather than
+  by this project.
+
 ### Viewing logs
 
 ```bash
