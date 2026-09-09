@@ -32,7 +32,7 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = config::parse_args()?;
 
-    println!("keyboard-debouncer starting");
+    println!("keyboard-debouncer {} starting", env!("CARGO_PKG_VERSION"));
     println!("  target keys: {:?}", cfg.keys);
     println!("  debounce all: {}", cfg.debounce.debounce_all);
     println!("  threshold : {} ms", cfg.debounce.threshold_ms);

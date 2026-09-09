@@ -88,6 +88,7 @@ pub fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::er
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliAction {
     Help,
+    Version,
     Run(Option<PathBuf>),
 }
 
@@ -103,6 +104,7 @@ where
         let s = arg.as_ref();
         match s {
             "-h" | "--help" => return Ok(CliAction::Help),
+            "-V" | "--version" => return Ok(CliAction::Version),
             "-c" | "--config" => {
                 let val = iter
                     .next()
@@ -155,10 +157,15 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
                  Options:\n\
                    -c, --config <PATH>  Path to configuration file\n\
                    -h, --help           Print help information\n\
+                   -V, --version        Print version information\n\
                  \n\
                  If no config path is provided, looks for `debouncer.conf` in the current directory,\n\
                  or `/etc/debouncer.conf`."
             );
+            std::process::exit(0);
+        }
+        CliAction::Version => {
+            println!("keyboard-debouncer {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         }
         CliAction::Run(explicit_path) => resolve_config_path(explicit_path)?,
@@ -281,6 +288,15 @@ mod tests {
     fn test_parse_cli_args_help() {
         assert_eq!(parse_cli_args(vec!["-h"]).unwrap(), CliAction::Help);
         assert_eq!(parse_cli_args(vec!["--help"]).unwrap(), CliAction::Help);
+    }
+
+    #[test]
+    fn test_parse_cli_args_version() {
+        assert_eq!(parse_cli_args(vec!["-V"]).unwrap(), CliAction::Version);
+        assert_eq!(
+            parse_cli_args(vec!["--version"]).unwrap(),
+            CliAction::Version
+        );
     }
 
     #[test]
