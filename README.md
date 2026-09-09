@@ -194,6 +194,15 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now keyboard-debouncer
 ```
 
+> [!IMPORTANT]
+> These steps assume a **fresh** install. If you are repeating them to upgrade an
+> existing one, `enable --now` will not restart a unit that is already running, so
+> the daemon carries on executing the old binary. Finish with an explicit restart:
+> ```bash
+> sudo systemctl restart keyboard-debouncer
+> ```
+> See [Upgrading](#upgrading) for the details.
+
 #### 7 — Verify it's running
 
 ```bash
