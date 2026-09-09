@@ -25,11 +25,14 @@ out high‑speed bounce, and re‑injects clean key events through a virtual dev
 
 ## Prerequisites
 
-Before building this project, you need to ensure that your system has a C compiler and development tools installed (required by some of our underlying dependencies like `evdev` and `libsqlite3-sys`).
+**Platform: Linux only.** The daemon grabs `/dev/input/event*` through `evdev`, re-injects
+events via `/dev/uinput`, and ships a udev rule plus a systemd unit — none of which exist
+on macOS or Windows. The `evdev` crate is Linux-only, so the build fails on those
+platforms whatever toolchain is installed. WSL2 compiles it, but has no physical keyboard
+to grab.
 
-### Linux
-
-Install the standard development toolchain for your distribution:
+You also need a C compiler and development headers, required by `libsqlite3-sys` to build
+the bundled SQLite. Install the standard toolchain for your distribution:
 
 - **Ubuntu / Debian / Pop!_OS:**
   ```bash
@@ -45,18 +48,6 @@ Install the standard development toolchain for your distribution:
   ```bash
   sudo pacman -S base-devel
   ```
-
-### macOS
-
-Install the Xcode Command Line Tools:
-
-```bash
-xcode-select --install
-```
-
-### Windows
-
-If building via WSL, follow the Linux instructions inside your terminal. If building natively, you will need the **Desktop development with C++** workload installed via the [Visual Studio Installer](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
 
 ## How to use
 
