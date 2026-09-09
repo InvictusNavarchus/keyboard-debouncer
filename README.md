@@ -78,6 +78,7 @@ If building via WSL, follow the Linux instructions inside your terminal. If buil
    ```
    If no path is specified, the daemon looks for `debouncer.conf` in the current
    directory, then `/etc/debouncer.conf`. Supports `-c` or `--config <PATH>` flags.
+   Use `-h`/`--help` for usage and `-V`/`--version` to print the build version.
 
    > **Tip**: Add your user to the `input` group so you can run the daemon
    > without `sudo` after a one‑time setup:
@@ -199,6 +200,34 @@ sudo systemctl enable --now keyboard-debouncer
 sudo systemctl status keyboard-debouncer
 ```
 
+### Upgrading
+
+```bash
+git pull
+cargo build --release
+sudo ./install.sh
+```
+
+Re-running the installer is safe: `/etc/debouncer.conf` is never overwritten, and
+the `kbd-debouncer` user is only created if absent. The udev rule and the
+module-load entry are rewritten to their known-good contents on every run.
+
+If the service is already running, the installer restarts it. This matters more
+than it looks — replacing the binary on disk does **not** affect a process that
+is already running, and `systemctl daemon-reload` only re-reads unit files, not
+the executable they point at. Without the restart an upgrade appears to succeed
+while the old code keeps handling your keystrokes.
+
+Confirm the new build is actually live:
+
+```bash
+keyboard-debouncer --version
+sudo systemctl status keyboard-debouncer
+```
+
+The daemon also logs its version on startup, so `journalctl -u keyboard-debouncer -b`
+tells you which build produced any given run after the fact.
+
 ### Viewing logs
 
 ```bash
@@ -217,6 +246,7 @@ journalctl -u keyboard-debouncer -b
 | Stop the daemon | `sudo systemctl stop keyboard-debouncer` |
 | Disable autostart | `sudo systemctl disable keyboard-debouncer` |
 | Check status | `sudo systemctl status keyboard-debouncer` |
+| Check installed version | `keyboard-debouncer --version` |
 
 ### Health tracker database path
 
