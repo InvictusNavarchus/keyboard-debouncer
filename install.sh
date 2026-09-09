@@ -36,16 +36,23 @@ if [ ! -f "target/release/keyboard-debouncer" ]; then
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
         USER_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
         CARGO_BIN="$USER_HOME/.cargo/bin"
-        if command -v cargo >/dev/null 2>&1; then
+        # Probe for cargo as the invoking user with their rustup bin dir on PATH.
+        # Probing as root answers the wrong question: rustup installs per-user, so
+        # root's PATH says nothing about whether $SUDO_USER can build.
+        if sudo -u "$SUDO_USER" env PATH="$CARGO_BIN:$PATH" \
+            sh -c 'command -v cargo' >/dev/null 2>&1; then
             echo "==> Building release binary as '$SUDO_USER'..."
-            sudo -u "$SUDO_USER" cargo build --release
-        elif [ -x "$CARGO_BIN/cargo" ]; then
-            echo "==> Building release binary as '$SUDO_USER' via $CARGO_BIN/cargo..."
             sudo -u "$SUDO_USER" env PATH="$CARGO_BIN:$PATH" cargo build --release
         fi
-    elif command -v cargo >/dev/null 2>&1; then
-        echo "==> Building release binary..."
-        cargo build --release
+    else
+        # Building here would run cargo as root and leave a root-owned target/,
+        # which breaks every later unprivileged `cargo build` with permission
+        # errors that give no hint the installer caused them.
+        echo "Error: Refusing to build as root — that would leave a root-owned target/." >&2
+        echo "       Build as your normal user first, then re-run the installer:" >&2
+        echo "         cargo build --release" >&2
+        echo "         sudo ./install.sh" >&2
+        exit 1
     fi
 fi
 
