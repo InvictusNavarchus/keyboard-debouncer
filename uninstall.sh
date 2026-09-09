@@ -5,6 +5,9 @@
 # Requires root for the same reasons the installer does: it removes system
 # files, the udev rule, and the dedicated 'kbd-debouncer' system user.
 #
+# /etc/modules-load.d/uinput.conf is deliberately never removed — see the
+# reasoning at that step.
+#
 # By default this removes only what the installer provisioned and leaves YOUR
 # data alone — /etc/debouncer.conf and the tracker database under
 # /var/lib/keyboard-debouncer/ are preserved. Everything the installer creates
@@ -24,7 +27,6 @@ DAEMON_USER=kbd-debouncer
 # shared file so this script stays standalone — it must work when fetched on its
 # own, without the rest of the tree.
 MODULES_LOAD_PATH=/etc/modules-load.d/uinput.conf
-MODULES_LOAD_CONTENT='uinput'
 UDEV_RULE_PATH=/etc/udev/rules.d/99-keyboard-debouncer.rules
 LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-uinput.rules
 UDEV_RULE_CONTENT='KERNEL=="uinput", GROUP="input", MODE="0660"'
@@ -127,15 +129,17 @@ fi
 # uinput is shared infrastructure: other tools (input remappers, controller
 # drivers) may depend on this entry force-loading it at boot, and /dev/uinput
 # cannot be opened to trigger an on-demand load because the node does not exist
-# until the module is in. Since the installer writes this path unconditionally,
-# content is the only evidence of whether the file is ours.
+# until the module is in.
+#
+# Unlike the udev rule, this file carries no fingerprint: 'uinput' is the only
+# plausible content, so it cannot distinguish ours from one a user or another
+# package wrote. The harm is asymmetric — leaving seven bytes behind costs
+# tidiness, while deleting a file we did not own breaks unrelated software at
+# the next boot with almost no diagnostic trail. So it always stays.
 if [ -f "$MODULES_LOAD_PATH" ]; then
-    if [ "$(cat "$MODULES_LOAD_PATH")" = "$MODULES_LOAD_CONTENT" ]; then
-        echo "==> Removing $MODULES_LOAD_PATH..."
-        rm -f "$MODULES_LOAD_PATH"
-    else
-        echo "==> Leaving $MODULES_LOAD_PATH in place (modified since install)."
-    fi
+    echo "==> Leaving $MODULES_LOAD_PATH in place."
+    echo "    Other software may rely on uinput loading at boot. Remove it by"
+    echo "    hand if nothing else on this system needs /dev/uinput."
 fi
 
 if [ "$PURGE" -eq 1 ]; then
