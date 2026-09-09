@@ -100,6 +100,22 @@ if command -v systemctl >/dev/null 2>&1; then
     fi
 fi
 
+# A binary started by hand is invisible to systemctl, and the README documents
+# running it that way. Deleting files under a live instance leaves it holding an
+# exclusive grab on the keyboard with its binary already unlinked — recoverable
+# once it exits, but baffling until then.
+#
+# Matched with -f against the installed path, not -x against the name: comm is
+# truncated to 15 characters and "keyboard-debouncer" is 18, so a name match can
+# never succeed. Warn rather than abort; a false positive should not block an
+# uninstall the user has already committed to.
+if command -v pgrep >/dev/null 2>&1 && pgrep -f "$BINARY_PATH" >/dev/null 2>&1; then
+    echo "Warning: a '$SERVICE_NAME' process is still running outside systemd." >&2
+    echo "         It keeps an exclusive grab on your keyboard until it exits." >&2
+    echo "         Stop it with: sudo pkill -f $BINARY_PATH" >&2
+    echo "" >&2
+fi
+
 if [ -f "$UNIT_PATH" ]; then
     echo "==> Removing $UNIT_PATH..."
     rm -f "$UNIT_PATH"
