@@ -25,6 +25,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Kept in sync by hand with uninstall.sh, which must know the same paths to be
+# able to reverse this script while remaining standalone.
+UDEV_RULE_PATH=/etc/udev/rules.d/99-keyboard-debouncer.rules
+LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-uinput.rules
+UDEV_RULE_CONTENT='KERNEL=="uinput", GROUP="input", MODE="0660"'
+
 if [ ! -f "target/release/keyboard-debouncer" ]; then
     echo "==> Release binary not found at target/release/keyboard-debouncer."
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
@@ -72,9 +78,18 @@ fi
 
 echo "==> Setting up udev rules for /dev/uinput..."
 mkdir -p /etc/udev/rules.d
-cat << 'EOF' > /etc/udev/rules.d/99-uinput.rules
-KERNEL=="uinput", GROUP="input", MODE="0660"
-EOF
+printf '%s\n' "$UDEV_RULE_CONTENT" > "$UDEV_RULE_PATH"
+
+# Releases up to v0.1.0 wrote this rule under a name describing the *device*
+# rather than this package, so another package could legitimately own that path.
+# Reclaim it only when its content is byte-identical to what we used to write;
+# a hand-edited or third-party file with the same name is left alone.
+if [ -f "$LEGACY_UDEV_RULE_PATH" ] \
+    && [ "$(cat "$LEGACY_UDEV_RULE_PATH")" = "$UDEV_RULE_CONTENT" ]; then
+    rm -f "$LEGACY_UDEV_RULE_PATH"
+    echo "    Removed superseded $LEGACY_UDEV_RULE_PATH."
+fi
+
 if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
