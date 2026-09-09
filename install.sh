@@ -14,9 +14,55 @@
 # with zero root access, sandboxed by systemd directives.
 #
 # This script installs; it does not build. Run `cargo build --release` as your
-# normal user first.
+# normal user first, or point --binary at a prebuilt binary.
 #
 set -euo pipefail
+
+DEFAULT_BINARY="target/release/keyboard-debouncer"
+BINARY_SOURCE=""
+
+usage() {
+    echo "Usage: sudo ./install.sh [--binary <PATH>]"
+    echo ""
+    echo "  --binary <PATH>  Install this binary instead of $DEFAULT_BINARY."
+    echo "                   Relative paths resolve against your current directory."
+    echo "  -h, --help       Print this help."
+}
+
+# Parsed before the root check so --help works unprivileged.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --binary)
+            if [ $# -lt 2 ]; then
+                echo "Error: --binary requires a path argument." >&2
+                exit 1
+            fi
+            BINARY_SOURCE="$2"
+            shift 2
+            ;;
+        --binary=*)
+            BINARY_SOURCE="${1#--binary=}"
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Error: unknown option '$1'. Use --help for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Absolutise while we are still in the caller's directory: the cd below would
+# otherwise silently reinterpret a relative path against the script's location.
+if [ -n "$BINARY_SOURCE" ]; then
+    case "$BINARY_SOURCE" in
+        /*) ;;
+        *) BINARY_SOURCE="$PWD/$BINARY_SOURCE" ;;
+    esac
+fi
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     echo "Error: Installation requires root privileges to configure system files, udev rules," >&2
@@ -34,16 +80,25 @@ UDEV_RULE_PATH=/etc/udev/rules.d/99-keyboard-debouncer.rules
 LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-uinput.rules
 UDEV_RULE_CONTENT='KERNEL=="uinput", GROUP="input", MODE="0660"'
 
-if [ ! -f "target/release/keyboard-debouncer" ]; then
-    echo "Error: Release binary not found at target/release/keyboard-debouncer." >&2
-    echo "       Build it as your normal user, then re-run the installer:" >&2
-    echo "         cargo build --release" >&2
-    echo "         sudo ./install.sh" >&2
-    exit 1
+if [ -n "$BINARY_SOURCE" ]; then
+    if [ ! -f "$BINARY_SOURCE" ]; then
+        echo "Error: No binary at $BINARY_SOURCE." >&2
+        exit 1
+    fi
+else
+    BINARY_SOURCE="$DEFAULT_BINARY"
+    if [ ! -f "$BINARY_SOURCE" ]; then
+        echo "Error: Release binary not found at $DEFAULT_BINARY." >&2
+        echo "       Build it as your normal user, then re-run the installer:" >&2
+        echo "         cargo build --release" >&2
+        echo "         sudo ./install.sh" >&2
+        echo "       Or install a prebuilt binary with: --binary <PATH>" >&2
+        exit 1
+    fi
 fi
 
 echo "==> Installing binary to /usr/local/bin..."
-install -D -m 755 target/release/keyboard-debouncer /usr/local/bin/keyboard-debouncer
+install -D -m 755 "$BINARY_SOURCE" /usr/local/bin/keyboard-debouncer
 
 echo "==> Ensuring 'uinput' kernel module loads on boot..."
 mkdir -p /etc/modules-load.d
