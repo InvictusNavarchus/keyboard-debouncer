@@ -113,6 +113,13 @@ cargo build --release
 sudo ./install.sh
 ```
 
+By default it installs `target/release/keyboard-debouncer`. To install a binary
+from somewhere else — a prebuilt one, or an alternate build — pass `--binary`:
+
+```bash
+sudo ./install.sh --binary /path/to/keyboard-debouncer
+```
+
 The script automatically:
 - Installs the release binary to `/usr/local/bin/keyboard-debouncer`
 - Ensures the `uinput` kernel module loads at boot (`/etc/modules-load.d/uinput.conf`)
