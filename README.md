@@ -177,7 +177,7 @@ the virtual keyboard) is typically owned by `root`. Add a udev rule to fix this:
 
 ```bash
 echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' \
-    | sudo tee /etc/udev/rules.d/99-uinput.rules
+    | sudo tee /etc/udev/rules.d/99-keyboard-debouncer.rules
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
@@ -236,6 +236,43 @@ sudo systemctl status keyboard-debouncer
 
 The daemon also logs its version on startup, so `journalctl -u keyboard-debouncer -b`
 tells you which build produced any given run after the fact.
+
+### Uninstalling
+
+```bash
+sudo ./uninstall.sh
+```
+
+Stops and disables the service, then removes the binary, the systemd unit, the
+udev rule, and the `kbd-debouncer` user.
+
+**Your data is kept by default.** `/etc/debouncer.conf` and the tracker database
+in `/var/lib/keyboard-debouncer/` survive, because everything else can be
+recreated by re-running the installer while a hand-tuned config and an
+accumulated chatter history cannot. To delete those too:
+
+```bash
+sudo ./uninstall.sh --purge
+```
+
+`--purge` lists exactly what it will destroy and asks for confirmation first.
+
+Three things it deliberately leaves alone:
+
+- **`/etc/modules-load.d/uinput.conf` is never removed**, only reported. `uinput`
+  is shared infrastructure and other tools may rely on it loading at boot, and
+  because `uinput` is the only sensible content for that file there is no way to
+  tell ours from one you or another package wrote. Deleting it wrongly would
+  break unrelated software one reboot later with nothing pointing back here, so
+  it stays. Remove it by hand if nothing else on the system needs `/dev/uinput`.
+- **A `kbd-debouncer` account this installer did not create.** Ownership is
+  checked against the comment field `install.sh` sets, not the name alone.
+- **The `input` group**, which comes from your distribution rather than from this
+  project.
+
+If a copy of the daemon is still running outside systemd — started by hand
+rather than through the service — the uninstaller warns and tells you how to
+stop it, but continues.
 
 ### Viewing logs
 

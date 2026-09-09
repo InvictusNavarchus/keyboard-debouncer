@@ -13,6 +13,9 @@
 # Once installed, the daemon itself runs strictly UNPRIVILEGED as 'kbd-debouncer'
 # with zero root access, sandboxed by systemd directives.
 #
+# This script installs; it does not build. Run `cargo build --release` as your
+# normal user first.
+#
 set -euo pipefail
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -25,30 +28,17 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-if [ ! -f "target/release/keyboard-debouncer" ]; then
-    echo "==> Release binary not found at target/release/keyboard-debouncer."
-    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-        USER_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
-        CARGO_BIN="$USER_HOME/.cargo/bin"
-        if command -v cargo >/dev/null 2>&1; then
-            echo "==> Building release binary as '$SUDO_USER'..."
-            sudo -u "$SUDO_USER" cargo build --release
-        elif [ -x "$CARGO_BIN/cargo" ]; then
-            echo "==> Building release binary as '$SUDO_USER' via $CARGO_BIN/cargo..."
-            sudo -u "$SUDO_USER" env PATH="$CARGO_BIN:$PATH" cargo build --release
-        fi
-    elif command -v cargo >/dev/null 2>&1; then
-        echo "==> Building release binary..."
-        cargo build --release
-    fi
-fi
+# Kept in sync by hand with uninstall.sh, which must know the same paths to be
+# able to reverse this script while remaining standalone.
+UDEV_RULE_PATH=/etc/udev/rules.d/99-keyboard-debouncer.rules
+LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-uinput.rules
+UDEV_RULE_CONTENT='KERNEL=="uinput", GROUP="input", MODE="0660"'
 
 if [ ! -f "target/release/keyboard-debouncer" ]; then
-    echo "Error: Could not build or locate target/release/keyboard-debouncer." >&2
-    echo "Please build the project first as a regular user:" >&2
-    echo "  cargo build --release" >&2
-    echo "Then re-run the installer:" >&2
-    echo "  sudo ./install.sh" >&2
+    echo "Error: Release binary not found at target/release/keyboard-debouncer." >&2
+    echo "       Build it as your normal user, then re-run the installer:" >&2
+    echo "         cargo build --release" >&2
+    echo "         sudo ./install.sh" >&2
     exit 1
 fi
 
@@ -72,9 +62,20 @@ fi
 
 echo "==> Setting up udev rules for /dev/uinput..."
 mkdir -p /etc/udev/rules.d
-cat << 'EOF' > /etc/udev/rules.d/99-uinput.rules
-KERNEL=="uinput", GROUP="input", MODE="0660"
-EOF
+printf '%s\n' "$UDEV_RULE_CONTENT" > "$UDEV_RULE_PATH"
+
+# Releases up to v0.1.0 wrote this rule under a name describing the *device*
+# rather than this package, so another package could legitimately own that path.
+# Reclaim it only when its content is byte-identical to what we used to write;
+# a hand-edited or third-party file with the same name is left alone. cmp
+# rather than $(cat) because command substitution strips trailing newlines,
+# which would match a file differing from ours by exactly that.
+if [ -f "$LEGACY_UDEV_RULE_PATH" ] \
+    && printf '%s\n' "$UDEV_RULE_CONTENT" | cmp -s - "$LEGACY_UDEV_RULE_PATH"; then
+    rm -f "$LEGACY_UDEV_RULE_PATH"
+    echo "    Removed superseded $LEGACY_UDEV_RULE_PATH."
+fi
+
 if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
