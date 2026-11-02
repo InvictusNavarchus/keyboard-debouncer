@@ -384,13 +384,17 @@ bun scripts/analyze.ts --db /path/to/keys.db --days 14
 bun scripts/analyze.ts --help
 ```
 
-The database path defaults to `/var/lib/keyboard-debouncer/keys.db`. The service's
-private database requires elevated read access; use your Bun executable's full
-path if it is not on sudo's PATH:
+The database path defaults to `/var/lib/keyboard-debouncer/keys.db`. For the
+service's private database, use the shortcut from the repository root:
 
 ```bash
-sudo "$(command -v bun)" scripts/analyze.ts
+bun run analyze
+bun run analyze --days 14
 ```
+
+The shortcut runs the report through `sudo`, using your Bun executable's full path
+so Bun does not need to be on sudo's PATH. It may prompt for your password. All
+arguments are forwarded; use `--db PATH` to override the default database.
 
 The default window is the past **7 × 24 hours**, ending when the report starts.
 `--days` accepts a positive whole number. Each keyboard gets its own report:
