@@ -179,6 +179,59 @@ test("CLI validates arguments and help works without opening a database", () => 
   expect(result.stdout.toString()).toContain("Usage:");
 });
 
+test("migrated databases mix labeled historical and measured timings without inventing restart gaps", () => {
+  const db = fixture();
+  db.exec(
+    "ALTER TABLE key_events ADD COLUMN gap_ms REAL; ALTER TABLE key_events ADD COLUMN hold_ms REAL; ALTER TABLE key_events ADD COLUMN timing_version INTEGER",
+  );
+  const insert = db.query(
+    "INSERT INTO key_events VALUES (?, 'KEY_A', ?, ?, 1, ?, ?, ?)",
+  );
+  insert.run(start, 1, 0, null, null, null);
+  insert.run(start + 10, 0, 0, null, null, null);
+  insert.run(start + 20, 1, 0, null, null, 1);
+  insert.run(start + 30, 0, 0, null, 9.876, 1);
+  insert.run(start + 40, 1, 1, 3.125, null, 1);
+  insert.run(start + 50, 0, 1, null, 7.5, 1);
+  const reports = collectReports(db, start, end);
+  const timing = reports[0]?.timing;
+  expect(
+    timing?.overall.find((row) => row.category === "Forwarded gap")?.count,
+  ).toBe(0);
+  expect(
+    timing?.overall.find((row) => row.category === "Forwarded hold"),
+  ).toMatchObject({ count: 2, measured: 1, reconstructed: 1 });
+  expect(
+    timing?.overall.find((row) => row.category === "Suppressed gap")?.median,
+  ).toBe(3.125);
+  expect(
+    timing?.overall.find((row) => row.category === "Suppressed hold")?.median,
+  ).toBe(7.5);
+  expect(formatReport(reports, start, end)).toContain(
+    "Mono = stored monotonic durations; Approx = historical wall-clock reconstruction.",
+  );
+});
+
+test("measured samples use the endpoint window and need no recorded predecessor", () => {
+  const db = fixture();
+  db.exec(
+    "ALTER TABLE key_events ADD COLUMN gap_ms REAL; ALTER TABLE key_events ADD COLUMN hold_ms REAL; ALTER TABLE key_events ADD COLUMN timing_version INTEGER",
+  );
+  db.query(
+    "INSERT INTO key_events VALUES (?, 'KEY_A', 1, 1, 1, 1234.5, NULL, 1)",
+  ).run(start);
+  db.query(
+    "INSERT INTO key_events VALUES (?, 'KEY_B', 0, 0, 1, NULL, 99.9, 1)",
+  ).run(start + 1);
+  const timing = collectReports(db, start, end)[0]?.timing;
+  expect(
+    timing?.overall.find((row) => row.category === "Suppressed gap"),
+  ).toMatchObject({ count: 1, measured: 1, reconstructed: 0, median: 1234.5 });
+  expect(
+    timing?.overall.find((row) => row.category === "Forwarded hold"),
+  ).toMatchObject({ count: 1, measured: 1, reconstructed: 0, median: 99.9 });
+});
+
 function runCli(args: string[], timezone = "UTC") {
   return Bun.spawnSync(
     [process.execPath, join(import.meta.dir, "analyze.ts"), ...args],

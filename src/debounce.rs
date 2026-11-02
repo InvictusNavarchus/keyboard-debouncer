@@ -1,9 +1,10 @@
 //! Keyboard debounce logic: state management, decision making, and event filtering.
 
+use crate::tracker::EventTiming;
 use evdev::{uinput::VirtualDevice, Device, EventSummary, InputEvent, KeyCode};
 use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant, SystemTime},
 };
 
 use colored::Colorize;
@@ -68,15 +69,14 @@ enum EventDecision {
     Suppress { reason: String },
 }
 
-/// All mutable debounce state that must be tracked independently for each
-/// target key.  One instance lives in the `HashMap<KeyCode, PerKeyState>` that is
-/// initialised in `run_filter_loop`.
+/// Independent timing state for each key, with suppression/tier state used only
+/// for debounce targets. Instances live in `run_filter_loop`'s key map.
 pub struct PerKeyState {
     /// Instant of the last UP event (forwarded OR suppressed) for gap measurement.
     /// Updated on every UP — forwarded and suppressed — because physically the key
     /// released at that moment regardless of our forwarding decision.
     last_up: Option<Instant>,
-    /// Instant of the last DN we forwarded (to measure hold duration).
+    /// Instant of the last DN, forwarded or suppressed (to measure hold duration).
     last_dn_at: Option<Instant>,
     /// true while we are inside a suppressed press/release pair (so we can
     /// also swallow the matching UP).
@@ -90,6 +90,21 @@ pub struct PerKeyState {
 }
 
 impl PerKeyState {
+    fn timing(&self, value: i32, now: Instant) -> EventTiming {
+        EventTiming {
+            gap: if value == 1 {
+                self.last_up.map(|up| now.duration_since(up))
+            } else {
+                None
+            },
+            hold: if value == 0 {
+                self.last_dn_at.map(|down| now.duration_since(down))
+            } else {
+                None
+            },
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             last_up: None,
@@ -125,15 +140,10 @@ impl PerKeyState {
 
 // ── hold duration helper ──────────────────────────────────────────────────────
 
-/// Compute the hold duration from `last_dn_at` to now, and return both the
-/// `Duration` and a formatted string "XX.XXms" (or "?" if no DN timestamp).
-/// Extracted to eliminate duplicated hold-duration calculation throughout the code.
-fn fmt_hold(last_dn_at: Option<Instant>) -> (Option<Duration>, String) {
-    let hold = last_dn_at.map(|t| Instant::now().duration_since(t));
-    let s = hold
-        .map(|h| format!("{:.2}ms", h.as_micros() as f64 / 1000.0))
-        .unwrap_or_else(|| "?".to_string());
-    (hold, s)
+/// Format the already measured hold without reading the clock again.
+fn fmt_hold(hold: Option<Duration>) -> String {
+    hold.map(|h| format!("{:.2}ms", h.as_micros() as f64 / 1000.0))
+        .unwrap_or_else(|| "?".to_string())
 }
 
 // ── modifier key detection ────────────────────────────────────────────────────
@@ -163,14 +173,15 @@ fn is_modifier_key(key: KeyCode) -> bool {
 
 /// Core event loop.
 ///
-/// State tracked per-loop (only for TARGET_KEYS):
+/// Timing state is tracked for every key; suppression/tier state is used only
+/// for debounce targets:
 /// - `last_up`             — Instant of the last UP (forwarded or suppressed)
 /// - `suppressed`         — true while we are inside a suppressed press/release
 ///   pair (so we can also swallow the matching UP)
 /// - `pending`            — buffered forward log messages, emitted only when a
 ///   subsequent suppress provides context
 ///
-/// Each target key has its own independent `PerKeyState` stored in a HashMap.
+/// Each key has its own independent `PerKeyState` stored in a HashMap.
 pub fn run_filter_loop(
     real: &mut Device,
     virt: &mut VirtualDevice,
@@ -185,40 +196,41 @@ pub fn run_filter_loop(
     let micro_hold_threshold = Duration::from_millis(cfg.micro_hold_threshold_ms);
     let micro_extended_threshold = Duration::from_millis(cfg.micro_extended_threshold_ms);
 
-    // Initialise independent debounce state for every target key.
-    let mut key_states: HashMap<KeyCode, PerKeyState> =
-        keys.iter().map(|&k| (k, PerKeyState::new())).collect();
+    let target_keys: HashSet<KeyCode> = keys.iter().copied().collect();
+    let mut key_states: HashMap<KeyCode, PerKeyState> = HashMap::new();
 
     loop {
         for event in real.fetch_events()? {
-            // Determine whether this event belongs to one of the target keys.
-            // Non-target keys are forwarded immediately without touching any state.
-            let (target_key, is_target) = match event.destructure() {
-                EventSummary::Key(_, k, _) => {
-                    // Lazy-insert for debounce_all mode (skip modifier/control keys)
-                    if debounce_all && !is_modifier_key(k) {
-                        key_states.entry(k).or_insert_with(PerKeyState::new);
-                    }
-                    (k, key_states.contains_key(&k))
-                }
+            // Only key events need timing and debounce state.
+            let target_key = match event.destructure() {
+                EventSummary::Key(_, k, _) => k,
                 _ => {
                     virt.emit(&[event])?;
                     continue;
                 }
             };
 
+            // Capture each clock once, before decisions, formatting, and logging.
+            let now = Instant::now();
+            let wall_time = SystemTime::now();
+            let is_target =
+                target_keys.contains(&target_key) || (debounce_all && !is_modifier_key(target_key));
+            // Keep timing state for non-target keys too; they are still tracked.
+            let state = key_states
+                .entry(target_key)
+                .or_insert_with(PerKeyState::new);
+            let timing = state.timing(event.value(), now);
+
             if !is_target {
-                tracker.track(
-                    target_key,
-                    event.value(),
-                    false,
-                    std::time::SystemTime::now(),
-                );
+                match event.value() {
+                    1 => state.last_dn_at = Some(now),
+                    0 => state.last_up = Some(now),
+                    _ => {}
+                }
+                tracker.track(target_key, event.value(), false, wall_time, timing);
                 virt.emit(&[event])?;
                 continue;
             }
-
-            let state = key_states.get_mut(&target_key).unwrap();
 
             let decision = process_event(
                 &event,
@@ -229,10 +241,10 @@ pub fn run_filter_loop(
                 short_hold_threshold,
                 micro_hold_threshold,
                 state,
+                timing,
             );
 
-            let now = std::time::SystemTime::now();
-            let ts = crate::fmt_ts_from(now);
+            let ts = crate::fmt_ts_from(wall_time);
             let forward = apply_decision(
                 decision,
                 &event,
@@ -241,9 +253,11 @@ pub fn run_filter_loop(
                 cfg.log_forward,
                 short_hold_threshold,
                 micro_hold_threshold,
+                now,
+                timing,
             );
 
-            tracker.track(target_key, event.value(), !forward, now);
+            tracker.track(target_key, event.value(), !forward, wall_time, timing);
 
             if forward {
                 virt.emit(&[event])?;
@@ -281,6 +295,7 @@ fn process_event(
     short_hold_threshold: Duration,
     micro_hold_threshold: Duration,
     state: &PerKeyState,
+    timing: EventTiming,
 ) -> EventDecision {
     // Auto-repeat (value == 2): forward unconditionally, no decision logic needed.
     if event.value() == 2 {
@@ -295,16 +310,14 @@ fn process_event(
 
     match event.value() {
         // ── Key Down ─────────────────────────────────────────────────────────
-        1 => match state.last_up {
+        1 => match timing.gap {
             None => {
                 // First press ever — no reference UP to compare against.
                 EventDecision::Forward {
                     reason: format!("{key:?}  (first press, no prior UP recorded)"),
                 }
             }
-            Some(last_up) => {
-                let now = Instant::now();
-                let gap = now.duration_since(last_up);
+            Some(gap) => {
                 let gap_ms = gap.as_micros() as f64 / 1000.0;
 
                 if gap < active_threshold {
@@ -326,13 +339,13 @@ fn process_event(
         // ── Key Up ────────────────────────────────────────────────────────────
         0 => {
             if state.suppressed {
-                let (_hold, hold_str) = fmt_hold(state.last_dn_at);
+                let hold_str = fmt_hold(timing.hold);
                 EventDecision::Suppress {
                     reason: format!("{key:?}  hold={hold_str} (paired UP for suppressed DN)"),
                 }
             } else {
-                let (hold, hold_str) = fmt_hold(state.last_dn_at);
-                let reason = match hold {
+                let hold_str = fmt_hold(timing.hold);
+                let reason = match timing.hold {
                     Some(h) if h < micro_hold_threshold => {
                         let next_ms = micro_extended_threshold.as_millis();
                         format!("{key:?}  hold={hold_str}  ⚠ micro hold → next threshold={next_ms}ms (micro-extended)")
@@ -363,6 +376,8 @@ fn apply_decision(
     log_forward: bool,
     short_hold_threshold: Duration,
     micro_hold_threshold: Duration,
+    now: Instant,
+    timing: EventTiming,
 ) -> bool {
     match decision {
         EventDecision::Forward { reason } => {
@@ -384,15 +399,13 @@ fn apply_decision(
             match event.value() {
                 1 => {
                     // Key Down
-                    state.last_dn_at = Some(Instant::now());
+                    state.last_dn_at = Some(now);
                     state.suppressed = false;
                     state.pending.clear(); // New press, clear old pending context
                 }
                 0 => {
                     // Key Up
-                    let now = Instant::now();
-                    let hold = state.last_dn_at.map(|t| now.duration_since(t));
-                    state.last_hold_tier = match hold {
+                    state.last_hold_tier = match timing.hold {
                         Some(h) if h < micro_hold_threshold => HoldTier::Micro,
                         Some(h) if h < short_hold_threshold => HoldTier::Short,
                         _ => HoldTier::Normal,
@@ -430,7 +443,7 @@ fn apply_decision(
                 1 => {
                     // Key Down - mark as suppressed
                     state.suppressed = true;
-                    state.last_dn_at = Some(Instant::now());
+                    state.last_dn_at = Some(now);
                 }
                 0 => {
                     // Key Up - end the suppressed pair.
@@ -452,12 +465,138 @@ fn apply_decision(
                     // prevents a chattery bounce's UP from being invisible to gap
                     // measurement, which could let a subsequent press slip through
                     // despite being within the threshold.
-                    state.last_up = Some(Instant::now());
+                    state.last_up = Some(now);
                 }
                 _ => {} // Auto-repeat: shouldn't happen
             }
 
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(state: &mut PerKeyState, value: i32, now: Instant) -> (bool, EventTiming, String) {
+        let event = InputEvent::new(evdev::EventType::KEY.0, KeyCode::KEY_A.code(), value);
+        let timing = state.timing(value, now);
+        let decision = process_event(
+            &event,
+            KeyCode::KEY_A,
+            Duration::from_millis(30),
+            Duration::from_millis(100),
+            Duration::from_millis(150),
+            Duration::from_millis(70),
+            Duration::from_millis(20),
+            state,
+            timing,
+        );
+        let reason = match &decision {
+            EventDecision::Forward { reason } | EventDecision::Suppress { reason } => {
+                reason.clone()
+            }
+        };
+        let forward = apply_decision(
+            decision,
+            &event,
+            state,
+            "12:00:00.000",
+            false,
+            Duration::from_millis(70),
+            Duration::from_millis(20),
+            now,
+            timing,
+        );
+        (forward, timing, reason)
+    }
+
+    #[test]
+    fn hold_log_and_tier_use_the_same_capture_at_boundaries() {
+        let base = Instant::now();
+        for (micros, expected_tier, label) in [
+            (19_999, HoldTier::Micro, "micro hold"),
+            (20_000, HoldTier::Short, "short hold"),
+            (69_999, HoldTier::Short, "short hold"),
+            (70_000, HoldTier::Normal, "hold=70.00ms"),
+        ] {
+            let mut state = PerKeyState::new();
+            let (forward, timing, _) = step(&mut state, 1, base);
+            assert!(forward);
+            assert!(timing.gap.is_none());
+            assert_eq!(state.last_dn_at, Some(base));
+            let elapsed = Duration::from_micros(micros);
+            let release = base + elapsed;
+            let (forward, timing, reason) = step(&mut state, 0, release);
+            assert!(forward);
+            assert_eq!(timing.hold, Some(elapsed));
+            assert_eq!(state.last_up, Some(release));
+            assert_eq!(
+                std::mem::discriminant(&state.last_hold_tier),
+                std::mem::discriminant(&expected_tier)
+            );
+            assert!(reason.contains(label), "{reason}");
+        }
+    }
+
+    #[test]
+    fn gap_boundary_uses_the_captured_duration_for_every_tier() {
+        let base = Instant::now();
+        for (tier, threshold) in [
+            (HoldTier::Normal, 30),
+            (HoldTier::Short, 100),
+            (HoldTier::Micro, 150),
+        ] {
+            let mut state = PerKeyState::new();
+            state.last_hold_tier = tier;
+            state.last_up = Some(base);
+            let just_below = Duration::from_micros(threshold * 1000 - 1);
+            let (forward, timing, _) = step(&mut state, 1, base + just_below);
+            assert!(!forward);
+            assert_eq!(timing.gap, Some(just_below));
+            assert_eq!(state.last_dn_at, Some(base + just_below));
+            // Reuse the same preceding UP to test exact equality independently.
+            let exact = Duration::from_millis(threshold);
+            let (forward, timing, _) = step(&mut state, 1, base + exact);
+            assert!(forward);
+            assert_eq!(timing.gap, Some(exact));
+        }
+    }
+
+    #[test]
+    fn suppressed_releases_update_gap_origin_without_disarming_the_hold_tier() {
+        let base = Instant::now();
+        let mut state = PerKeyState::new();
+        step(&mut state, 1, base);
+        step(&mut state, 0, base + Duration::from_millis(10));
+        assert!(!step(&mut state, 1, base + Duration::from_millis(30)).0);
+        let (forward, timing, _) = step(&mut state, 0, base + Duration::from_millis(35));
+        assert!(!forward);
+        assert_eq!(timing.hold, Some(Duration::from_millis(5)));
+        assert!(matches!(state.last_hold_tier, HoldTier::Micro));
+        let (forward, timing, _) = step(&mut state, 1, base + Duration::from_millis(184));
+        assert!(!forward);
+        assert_eq!(timing.gap, Some(Duration::from_millis(149)));
+        step(&mut state, 0, base + Duration::from_millis(190));
+        assert!(step(&mut state, 1, base + Duration::from_millis(340)).0);
+    }
+
+    #[test]
+    fn repeats_have_no_durations_and_do_not_move_press_or_release_captures() {
+        let base = Instant::now();
+        let mut state = PerKeyState::new();
+        step(&mut state, 1, base);
+        let (forward, timing, _) = step(&mut state, 2, base + Duration::from_millis(50));
+        assert!(forward);
+        assert!(timing.gap.is_none() && timing.hold.is_none());
+        assert_eq!(state.last_dn_at, Some(base));
+        assert!(state.last_up.is_none());
+        assert_eq!(
+            step(&mut state, 0, base + Duration::from_millis(100))
+                .1
+                .hold,
+            Some(Duration::from_millis(100))
+        );
     }
 }

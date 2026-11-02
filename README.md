@@ -344,6 +344,23 @@ a local SQLite database with millisecond‑accurate timestamps, the key name
 (e.g., `KEY_A`), the event value (`1` = down, `0` = up, `2` = auto‑repeat),
 and a `suppressed` flag (`0` = forwarded, `1` = dropped by the debouncer).
 
+For each key event, the daemon captures the monotonic clock and wall clock once,
+before filtering and logging. Gap/hold calculations, threshold decisions, and state
+updates share that monotonic capture; logs and `ts_ms` share the wall-clock capture.
+The tracker stores the calculated durations as nullable `gap_ms` and `hold_ms`
+SQLite `REAL` values, preserving sub-millisecond precision. A press stores the gap
+since the same key's last physical release; a release stores the hold since its
+last press. This includes suppressed cycles and keys outside the debounce targets.
+Auto-repeats have neither duration. The first press/release without a known prior
+release/press has a null duration. These are daemon processing timings, not kernel
+event timestamps.
+
+Startup automatically adds these columns plus `timing_version` to existing
+databases. Historical rows retain null timing fields and a null version; new rows
+use version `1`, including rows whose duration is unavailable. This distinguishes
+old data from intentionally missing measurements after a restart. No historical
+durations are backfilled. Upgrade and restart the daemon to begin recording them.
+
 When tracking is enabled, set `KEYBOARD_ID` to a unique label for the physical
 keyboard, such as `keychron-k8-desk-01`. This label identifies recording history;
 `KEYBOARD_NAME` / `DEVICE_PATH` still selects the input device. Keep the label
@@ -407,6 +424,8 @@ The default window is the past **7 × 24 hours**, ending when the report starts.
   rates so low-volume keys have context.
 - Gap and hold sample counts, minimum, p5, median, p95, and maximum in milliseconds,
   separately for forwarded and suppressed presses, overall and for each top key.
+  `Mono` counts stored monotonic samples; `Approx` counts reconstructed historical
+  samples. `Samples` is their sum; distributions and histograms combine both.
 - Overall gap histogram with buckets `<20`, `20–<30`, `30–<70`, `70–<100`,
   `100–<150`, and `≥150` ms. Counts separate forwarded and suppressed presses.
 
@@ -418,13 +437,20 @@ Percentiles use linear interpolation; empty samples display `—`. Zero-ms durat
 are retained because events can share a stored millisecond. Long idle gaps remain
 included, so use the histogram alongside percentiles when tuning debounce windows.
 
-Timings are reconstructed from integer wall-clock timestamps, in recording order,
-using only events inside the selected window. Pairs are kept separate by keyboard
-and key. Missing preceding releases, incomplete holds, inconsistent press/release
-decisions, and negative durations are skipped and counted. The first press per key
-usually has no gap sample. Events outside the window are not used to complete pairs.
-Restarts, lost recordings, and wall-clock changes that leave plausible positive
-durations cannot be identified reliably from this schema.
+New recordings use the daemon's stored monotonic durations directly, including
+when a predecessor falls outside the reporting window or its recording was lost.
+The event ending the gap or hold must be inside the window, selected by `ts_ms`.
+A null duration on a version `1` row is skipped; it is never reconstructed across
+a restart. Wall-clock adjustments affect calendar placement, not these durations.
+
+Historical timings are reconstructed from integer wall-clock timestamps, in
+recording order, using only events inside the selected window. Pairs are kept
+separate by keyboard and key. Missing preceding releases, incomplete holds,
+inconsistent press/release decisions, and negative durations are skipped and
+counted. Historical first presses usually have no gap sample. Events outside the
+window are not used to complete historical pairs. Restarts, lost recordings, and
+wall-clock changes that leave plausible positive durations cannot be identified
+reliably in historical data.
 
 Use the gap distributions to assess debounce windows, and hold distributions to
 assess micro/short hold cutoffs. Forwarded does not guarantee intentional typing,

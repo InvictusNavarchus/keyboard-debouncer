@@ -19,7 +19,8 @@ const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N]
 Read-only report in local time, separated by keyboard.
 Suppression rate = suppressed key-downs / all key-downs.
 Releases and auto-repeats are excluded from press counts.
-Gap/hold statistics reconstruct millisecond timings from recorded event pairs.`;
+Gap/hold statistics use recorded monotonic durations where available.
+Historical timings are reconstructed from millisecond wall-clock event pairs.`;
 
 interface Counts {
   presses: number;
@@ -81,10 +82,14 @@ export function collectReports(
 ): KeyboardReport[] {
   // A consistent snapshot across all aggregates, even while the daemon writes.
   return db.transaction(() => {
-    const hasIdentity = db
+    const columns = db
       .query<{ name: string }, []>("PRAGMA table_info(key_events)")
       .all()
-      .some((column) => column.name === "keyboard_id");
+      .map((column) => column.name);
+    const hasIdentity = columns.includes("keyboard_id");
+    const timingColumns = ["gap_ms", "hold_ms", "timing_version"]
+      .map((name) => (columns.includes(name) ? name : `NULL AS ${name}`))
+      .join(", ");
     const keyboards = hasIdentity
       ? db
           .query<Keyboard, [number, number]>(
@@ -129,7 +134,7 @@ export function collectReports(
       const events = db
         .query<TimingEvent, (number | null)[]>(
           `
-        SELECT ts_ms, key, value, suppressed FROM key_events
+        SELECT ts_ms, key, value, suppressed, ${timingColumns} FROM key_events
         WHERE ts_ms >= ? AND ts_ms < ? AND value IN (0, 1)
         ${hasIdentity ? "AND keyboard_id IS ?" : ""}
         ORDER BY rowid
@@ -200,10 +205,12 @@ function timingTable(title: string, stats: TimingStats[]): string {
   const ms = (value: number | null) =>
     value === null ? "—" : value.toFixed(1);
   return textTable([
-    [title, "Samples", "Min", "p5", "Median", "p95", "Max"],
+    [title, "Samples", "Mono", "Approx", "Min", "p5", "Median", "p95", "Max"],
     ...stats.map((row) => [
       row.category,
       String(row.count),
+      String(row.measured),
+      String(row.reconstructed),
       ...[row.min, row.p5, row.median, row.p95, row.max].map(ms),
     ]),
   ]);
@@ -288,7 +295,8 @@ export function formatReport(
       `Timing samples skipped: ${report.timing.skippedGaps} gaps, ${report.timing.skippedHolds} holds (missing, incomplete, inconsistent, or negative pairs).`,
       "Gap = same-key UP → DN, including suppressed UPs; hold = matching DN → UP.",
       "Gap decision is the next press; hold decision is the paired press. Auto-repeats ignored.",
-      "Approximate wall-clock timings; pairs stay within this window. Zero-ms samples retained.",
+      "Mono = stored monotonic durations; Approx = historical wall-clock reconstruction. Zero-ms samples retained.",
+      "Samples are selected by event wall time; stored durations may start before this window. Approx pairs stay within it.",
       "Restarts, recording gaps, and historical threshold changes are not identifiable; these statistics do not determine an ideal threshold.",
     );
   }

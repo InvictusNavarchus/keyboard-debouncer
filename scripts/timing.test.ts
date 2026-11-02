@@ -29,6 +29,8 @@ test("measures same-key physical gaps and paired holds separately by press decis
     {
       category: "Forwarded gap",
       count: 1,
+      measured: 0,
+      reconstructed: 1,
       min: 15,
       p5: 15,
       median: 15,
@@ -38,6 +40,8 @@ test("measures same-key physical gaps and paired holds separately by press decis
     {
       category: "Suppressed gap",
       count: 1,
+      measured: 0,
+      reconstructed: 1,
       min: 10,
       p5: 10,
       median: 10,
@@ -47,6 +51,8 @@ test("measures same-key physical gaps and paired holds separately by press decis
     {
       category: "Forwarded hold",
       count: 3,
+      measured: 0,
+      reconstructed: 3,
       min: 10,
       p5: 10,
       median: 10,
@@ -56,6 +62,8 @@ test("measures same-key physical gaps and paired holds separately by press decis
     {
       category: "Suppressed hold",
       count: 1,
+      measured: 0,
+      reconstructed: 1,
       min: 5,
       p5: 5,
       median: 5,
@@ -84,6 +92,8 @@ test("uses interpolated percentiles and preserves zero-ms holds in recording ord
   ).toEqual({
     category: "Forwarded hold",
     count: 4,
+    measured: 0,
+    reconstructed: 4,
     min: 0,
     p5: expect.closeTo(1.5, 8),
     median: 15,
@@ -152,4 +162,62 @@ test("empty timing sets have no invented samples", () => {
   expect(report.keys[0]?.stats).toEqual(report.overall);
   expect(report.skippedGaps).toBe(0);
   expect(report.skippedHolds).toBe(0);
+});
+
+test("stored monotonic durations override wall time and unavailable measurements never fall back", () => {
+  const report = collectTimings(
+    [
+      event(0, 1),
+      event(10, 0),
+      event(20, 1),
+      event(30, 0),
+      { ...event(40, 1), timing_version: 1, gap_ms: null },
+      { ...event(35, 0), timing_version: 1, hold_ms: 2.125 },
+      { ...event(50, 1, 1), timing_version: 1, gap_ms: 0.25 },
+      { ...event(55, 0, 1), timing_version: 1, hold_ms: 0 },
+      { ...event(60, 1), timing_version: 1, gap_ms: null },
+      { ...event(70, 0), timing_version: 1, hold_ms: null },
+    ],
+    ["KEY_A"],
+  );
+  expect(
+    report.overall.find((row) => row.category === "Forwarded gap"),
+  ).toMatchObject({ count: 1, measured: 0, reconstructed: 1, median: 10 });
+  expect(
+    report.overall.find((row) => row.category === "Forwarded hold"),
+  ).toMatchObject({ count: 3, measured: 1, reconstructed: 2, min: 2.125 });
+  expect(
+    report.overall.find((row) => row.category === "Suppressed gap"),
+  ).toMatchObject({ count: 1, measured: 1, reconstructed: 0, median: 0.25 });
+  expect(
+    report.overall.find((row) => row.category === "Suppressed hold"),
+  ).toMatchObject({ count: 1, measured: 1, reconstructed: 0, median: 0 });
+  expect(report.keys[0]?.stats).toEqual(report.overall);
+  expect(report.skippedGaps).toBe(3);
+  expect(report.skippedHolds).toBe(1);
+});
+
+test("migration boundaries do not pair historical presses with measured releases", () => {
+  const report = collectTimings(
+    [event(0, 1), { ...event(10, 0), timing_version: 1, hold_ms: null }],
+    [],
+  );
+  expect(report.overall.every((row) => row.count === 0)).toBe(true);
+  expect(report.skippedHolds).toBe(2);
+});
+
+test("invalid measured durations are skipped, while unknown versions fail explicitly", () => {
+  const report = collectTimings(
+    [
+      { ...event(0, 1), timing_version: 1, gap_ms: -1 },
+      { ...event(10, 0), timing_version: 1, hold_ms: Infinity },
+    ],
+    [],
+  );
+  expect(report.overall.every((row) => row.count === 0)).toBe(true);
+  expect(report.skippedGaps).toBe(1);
+  expect(report.skippedHolds).toBe(1);
+  expect(() =>
+    collectTimings([{ ...event(0, 1), timing_version: 2 }], []),
+  ).toThrow("Unsupported timing version: 2");
 });

@@ -3,7 +3,14 @@ use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Durations measured once from the event's monotonic capture.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EventTiming {
+    pub gap: Option<Duration>,
+    pub hold: Option<Duration>,
+}
 
 #[derive(Debug)]
 pub struct TrackEvent {
@@ -11,6 +18,7 @@ pub struct TrackEvent {
     pub key: KeyCode,
     pub value: i32,
     pub suppressed: bool,
+    pub timing: EventTiming,
 }
 
 pub struct Tracker {
@@ -45,7 +53,14 @@ impl Tracker {
         Ok(Self { sender: Some(tx) })
     }
 
-    pub fn track(&self, key: KeyCode, value: i32, suppressed: bool, now: SystemTime) {
+    pub fn track(
+        &self,
+        key: KeyCode,
+        value: i32,
+        suppressed: bool,
+        now: SystemTime,
+        timing: EventTiming,
+    ) {
         if let Some(sender) = &self.sender {
             let ts_ms = now
                 .duration_since(UNIX_EPOCH)
@@ -57,6 +72,7 @@ impl Tracker {
                 key,
                 value,
                 suppressed,
+                timing,
             };
 
             match sender.try_send(event) {
@@ -90,16 +106,27 @@ fn initialize_database(conn: &mut Connection, identity: &str) -> rusqlite::Resul
         );
         CREATE INDEX IF NOT EXISTS idx_key_events_ts ON key_events(ts_ms);",
     )?;
-    let has_keyboard_id = {
+    let columns = {
         let mut stmt = tx.prepare("PRAGMA table_info(key_events)")?;
         let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        let names = names.collect::<rusqlite::Result<Vec<_>>>()?;
-        names.iter().any(|name| name == "keyboard_id")
+        names.collect::<rusqlite::Result<Vec<_>>>()?
     };
-    if !has_keyboard_id {
+    if !columns.iter().any(|name| name == "keyboard_id") {
         tx.execute_batch(
             "ALTER TABLE key_events ADD COLUMN keyboard_id INTEGER REFERENCES keyboards(id)",
         )?;
+    }
+    for (name, sql) in [
+        ("gap_ms", "ALTER TABLE key_events ADD COLUMN gap_ms REAL"),
+        ("hold_ms", "ALTER TABLE key_events ADD COLUMN hold_ms REAL"),
+        (
+            "timing_version",
+            "ALTER TABLE key_events ADD COLUMN timing_version INTEGER",
+        ),
+    ] {
+        if !columns.iter().any(|column| column == name) {
+            tx.execute_batch(sql)?;
+        }
     }
     tx.execute(
         "INSERT INTO keyboards (identity) VALUES (?1) ON CONFLICT(identity) DO NOTHING",
@@ -145,8 +172,8 @@ fn record_events(
         let mut success = true;
         {
             if let Ok(mut stmt) = tx_conn.prepare_cached(
-                "INSERT INTO key_events (ts_ms, key, value, suppressed, keyboard_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO key_events (ts_ms, key, value, suppressed, keyboard_id, gap_ms, hold_ms, timing_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
             ) {
                 for ev in &buffer {
                     if let Err(e) = stmt.execute(params![
@@ -154,7 +181,9 @@ fn record_events(
                         format!("{:?}", ev.key),
                         ev.value,
                         if ev.suppressed { 1 } else { 0 },
-                        keyboard_id
+                        keyboard_id,
+                        ev.timing.gap.map(|d| d.as_secs_f64() * 1000.0),
+                        ev.timing.hold.map(|d| d.as_secs_f64() * 1000.0)
                     ]) {
                         eprintln!("Tracker: Failed to insert event: {}", e);
                         success = false;
@@ -188,6 +217,7 @@ mod tests {
             key: KeyCode::KEY_A,
             value: 1,
             suppressed,
+            timing: EventTiming::default(),
         })
         .unwrap();
         drop(tx);
@@ -271,7 +301,7 @@ mod tests {
         let old = conn.query_row("SELECT ts_ms, key, value, suppressed, keyboard_id FROM key_events WHERE ts_ms = 42", [], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i32>(2)?, r.get::<_, i32>(3)?, r.get::<_, Option<i64>>(4)?))).unwrap();
         assert_eq!(old, (42, "KEY_B".into(), 0, 1, None));
         assert!(conn
-            .execute("INSERT INTO key_events VALUES (0, 'KEY_A', 1, 0, 999)", [])
+            .execute("INSERT INTO key_events (ts_ms, key, value, suppressed, keyboard_id) VALUES (0, 'KEY_A', 1, 0, 999)", [])
             .is_err());
     }
 
@@ -311,6 +341,68 @@ mod tests {
     #[test]
     fn disabled_tracking_needs_no_identity() {
         assert!(Tracker::new(None, None).unwrap().sender.is_none());
+    }
+
+    #[test]
+    fn captures_and_submillisecond_durations_survive_recording_and_migration() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE keyboards (id INTEGER PRIMARY KEY, identity TEXT NOT NULL UNIQUE);
+            INSERT INTO keyboards VALUES (1, 'desk');
+            CREATE TABLE key_events (ts_ms INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, suppressed INTEGER NOT NULL, keyboard_id INTEGER REFERENCES keyboards(id));
+            INSERT INTO key_events VALUES (1, 'KEY_A', 1, 0, 1);").unwrap();
+        let id = initialize_database(&mut conn, "desk").unwrap();
+        assert_eq!(initialize_database(&mut conn, "desk").unwrap(), id);
+        let old: (Option<f64>, Option<f64>, Option<i64>) = conn
+            .query_row(
+                "SELECT gap_ms, hold_ms, timing_version FROM key_events WHERE ts_ms = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(old, (None, None, None));
+
+        let (tx, rx) = sync_channel(10);
+        let tracker = Tracker { sender: Some(tx) };
+        tracker.track(
+            KeyCode::KEY_A,
+            1,
+            true,
+            UNIX_EPOCH + Duration::from_millis(1234),
+            EventTiming {
+                gap: Some(Duration::from_micros(12_345)),
+                hold: None,
+            },
+        );
+        tracker.track(
+            KeyCode::KEY_A,
+            0,
+            true,
+            UNIX_EPOCH + Duration::from_millis(1233),
+            EventTiming {
+                gap: None,
+                hold: Some(Duration::from_micros(678)),
+            },
+        );
+        tracker.track(
+            KeyCode::KEY_A,
+            2,
+            false,
+            UNIX_EPOCH + Duration::from_millis(1235),
+            EventTiming::default(),
+        );
+        drop(tracker);
+        record_events(&mut conn, id, rx);
+        let rows: Vec<(i64, Option<f64>, Option<f64>, i64)> = conn.prepare(
+            "SELECT ts_ms, gap_ms, hold_ms, timing_version FROM key_events WHERE timing_version = 1 ORDER BY rowid"
+        ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].0, 1234);
+        assert!((rows[0].1.unwrap() - 12.345).abs() < 1e-9);
+        assert_eq!(rows[0].2, None);
+        assert_eq!(rows[1].0, 1233);
+        assert_eq!(rows[1].1, None);
+        assert!((rows[1].2.unwrap() - 0.678).abs() < 1e-9);
+        assert_eq!(rows[2], (1235, None, None, 1));
     }
 
     #[test]

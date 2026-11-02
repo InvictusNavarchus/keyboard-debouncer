@@ -3,6 +3,9 @@ export interface TimingEvent {
   key: string;
   value: number;
   suppressed: number;
+  gap_ms?: number | null;
+  hold_ms?: number | null;
+  timing_version?: number | null;
 }
 
 const CATEGORIES = [
@@ -17,6 +20,8 @@ type Samples = Record<Category, number[]>;
 export interface TimingStats {
   category: Category;
   count: number;
+  measured: number;
+  reconstructed: number;
   min: number | null;
   p5: number | null;
   median: number | null;
@@ -50,7 +55,10 @@ function emptySamples(): Samples {
   };
 }
 
-function summarize(samples: Samples): TimingStats[] {
+function summarize(
+  samples: Samples,
+  measured: Record<Category, number>,
+): TimingStats[] {
   return CATEGORIES.map((category) => {
     const values = samples[category].sort((a, b) => a - b);
     // Linear interpolation, including the conventional median for even counts.
@@ -64,6 +72,8 @@ function summarize(samples: Samples): TimingStats[] {
     return {
       category,
       count: values.length,
+      measured: measured[category],
+      reconstructed: values.length - measured[category],
       min: values[0] ?? null,
       p5: percentile(0.05),
       median: percentile(0.5),
@@ -81,25 +91,66 @@ export function collectTimings(
 ): TimingReport {
   const overall = emptySamples();
   const keys = new Map(affectedKeys.map((key) => [key, emptySamples()]));
+  const emptyCounts = (): Record<Category, number> => ({
+    "Forwarded gap": 0,
+    "Suppressed gap": 0,
+    "Forwarded hold": 0,
+    "Suppressed hold": 0,
+  });
+  const measured = emptyCounts();
+  const measuredKeys = new Map(affectedKeys.map((key) => [key, emptyCounts()]));
   const states = new Map<
     string,
     { down: TimingEvent | null; up: number | null }
   >();
   let skippedGaps = 0;
   let skippedHolds = 0;
-  const add = (key: string, category: Category, duration: number) => {
+  const add = (
+    key: string,
+    category: Category,
+    duration: number,
+    recorded = false,
+  ) => {
     overall[category].push(duration);
     keys.get(key)?.[category].push(duration);
+    if (recorded) {
+      measured[category]++;
+      const counts = measuredKeys.get(key);
+      if (counts) counts[category]++;
+    }
   };
 
   for (const event of events) {
     if (event.value !== 0 && event.value !== 1) continue;
+    const decision = event.suppressed === 1 ? "Suppressed" : "Forwarded";
+    if (event.timing_version != null) {
+      if (event.timing_version !== 1)
+        throw new Error(`Unsupported timing version: ${event.timing_version}`);
+      // A stored NULL means unavailable in the daemon (e.g. first press after a
+      // restart), not permission to invent a duration from adjacent wall times.
+      const old = states.get(event.key);
+      if (old?.down) skippedHolds++;
+      states.delete(event.key);
+      const duration = event.value === 1 ? event.gap_ms : event.hold_ms;
+      if (duration != null && Number.isFinite(duration) && duration >= 0) {
+        add(
+          event.key,
+          `${decision} ${event.value === 1 ? "gap" : "hold"}`,
+          duration,
+          true,
+        );
+      } else if (event.value === 1) {
+        skippedGaps++;
+      } else {
+        skippedHolds++;
+      }
+      continue;
+    }
     let state = states.get(event.key);
     if (!state) {
       state = { down: null, up: null };
       states.set(event.key, state);
     }
-    const decision = event.suppressed === 1 ? "Suppressed" : "Forwarded";
     if (event.value === 1) {
       if (state.down) {
         skippedHolds++;
@@ -129,10 +180,10 @@ export function collectTimings(
   for (const state of states.values()) if (state.down) skippedHolds++;
 
   return {
-    overall: summarize(overall),
+    overall: summarize(overall, measured),
     keys: [...keys].map(([key, samples]) => ({
       key,
-      stats: summarize(samples),
+      stats: summarize(samples, measuredKeys.get(key) ?? emptyCounts()),
     })),
     gapHistogram: (["Forwarded", "Suppressed"] as const).map((decision) => {
       const counts = Array<number>(6).fill(0);
