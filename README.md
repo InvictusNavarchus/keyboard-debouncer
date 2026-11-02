@@ -298,6 +298,7 @@ If you enable `TRACK_DB` in your config, use the path the service pre-creates fo
 
 ```
 TRACK_DB=/var/lib/keyboard-debouncer/keys.db
+KEYBOARD_ID=keychron-k8-desk-01
 ```
 
 The `StateDirectory=keyboard-debouncer` directive in the unit file ensures
@@ -329,6 +330,7 @@ permissions (`UMask=0077`).
 | `MICRO_HOLD_THRESHOLD_MS`      | No             | Hold below this is classified as *Micro* (hardware ghost contact), arming the micro-extended window. Default: `20`. |
 | `MICRO_EXTENDED_THRESHOLD_MS`  | No             | Debounce window after a *Micro* hold, in ms. Default: `150`. |
 | `LOG_FORWARD`                  | No             | `true` / `false` — log every forwarded event immediately. Default: `false`. |
+| `KEYBOARD_ID`                 | When tracking  | User-assigned unique label for this physical keyboard. Required when `TRACK_DB` is set. |
 | `TRACK_DB`                     | No             | Path to an SQLite file for passive key-health recording. Created automatically. Disabled by default. |
 
 See [`docs/debounce-algorithm.md`](docs/debounce-algorithm.md) for a detailed explanation
@@ -341,6 +343,35 @@ When `TRACK_DB` is set, every key press, release, and auto‑repeat is written t
 a local SQLite database with millisecond‑accurate timestamps, the key name
 (e.g., `KEY_A`), the event value (`1` = down, `0` = up, `2` = auto‑repeat),
 and a `suppressed` flag (`0` = forwarded, `1` = dropped by the debouncer).
+
+When tracking is enabled, set `KEYBOARD_ID` to a unique label for the physical
+keyboard, such as `keychron-k8-desk-01`. This label identifies recording history;
+`KEYBOARD_NAME` / `DEVICE_PATH` still selects the input device. Keep the label
+across restarts, reconnects, and USB port changes. Use a new label for a replacement
+keyboard, even the same model, and restore the previous label when switching back.
+The daemon trusts this label; it does not automatically detect a hardware swap.
+Restart the service after changing the config.
+
+The `keyboards` table stores each text identity once, with an integer primary key.
+Each event stores only its integer `keyboard_id` reference. Identity resolution
+happens once at startup, outside the event recording path; reconnects reuse it.
+No additional event index is created.
+
+Existing databases migrate automatically on startup. Historical events keep a
+`NULL` keyboard reference because their source cannot be inferred. **Before
+upgrading a tracking-enabled installation, add `KEYBOARD_ID` to its config**;
+missing or blank identities prevent startup. Database initialization errors also
+prevent startup rather than silently continuing without the requested recording.
+
+For example, inspect recent events with their identities (including old records):
+
+```sql
+SELECT e.ts_ms, k.identity, e.key, e.value, e.suppressed
+FROM key_events AS e
+LEFT JOIN keyboards AS k ON k.id = e.keyboard_id
+ORDER BY e.ts_ms DESC
+LIMIT 20;
+```
 
 ## License
 

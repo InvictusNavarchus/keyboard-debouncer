@@ -57,3 +57,8 @@ LOG_FORWARD=false
 # Data stays local. Ensure you restrict file permissions appropriately (e.g. chmod 600).
 # Example: TRACK_DB=/var/lib/keyboard-debouncer/keys.db
 # TRACK_DB=/var/lib/keyboard-debouncer/keys.db
+
+# Required when TRACK_DB is enabled: a unique label for this physical keyboard.
+# Keep it across restarts, reconnects, and USB port changes. Use a new label for
+# a replacement keyboard, even an identical model; restore the old label if switching back.
+# KEYBOARD_ID=keychron-k8-desk-01

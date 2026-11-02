@@ -24,6 +24,7 @@ pub struct Config {
     pub keys: Vec<KeyCode>,
     pub debounce: DebounceConfig,
     pub track_db: Option<PathBuf>,
+    pub keyboard_id: Option<String>,
 }
 
 fn load_conf(path: &std::path::Path) -> HashMap<String, String> {
@@ -240,6 +241,7 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
     };
 
     let track_db = conf.get("TRACK_DB").map(PathBuf::from);
+    let keyboard_id = parse_keyboard_id(&conf, track_db.is_some())?;
 
     Ok(Config {
         device_path,
@@ -255,12 +257,43 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
             debounce_all,
         },
         track_db,
+        keyboard_id,
     })
+}
+
+fn parse_keyboard_id(
+    conf: &HashMap<String, String>,
+    tracking: bool,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let identity = conf
+        .get("KEYBOARD_ID")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    if tracking && identity.is_none() {
+        return Err("KEYBOARD_ID is required when TRACK_DB is enabled; choose a unique label for this physical keyboard".into());
+    }
+    Ok(identity.map(str::to_owned))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_identity_is_required_only_for_tracking() {
+        let mut conf = HashMap::new();
+        assert!(parse_keyboard_id(&conf, true).is_err());
+        assert_eq!(parse_keyboard_id(&conf, false).unwrap(), None);
+        for blank in ["", "   "] {
+            conf.insert("KEYBOARD_ID".into(), blank.into());
+            assert!(parse_keyboard_id(&conf, true).is_err());
+        }
+        conf.insert("KEYBOARD_ID".into(), " desk-01 ".into());
+        assert_eq!(
+            parse_keyboard_id(&conf, true).unwrap().as_deref(),
+            Some("desk-01")
+        );
+    }
 
     #[test]
     fn test_parse_cli_args_empty() {
