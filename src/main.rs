@@ -47,7 +47,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    let tracker = tracker::Tracker::new(cfg.track_db.clone(), cfg.keyboard_id.as_deref())?;
+    let tracker = tracker::Tracker::new(
+        cfg.track_db.clone(),
+        cfg.keyboard_id.as_deref(),
+        &cfg.debounce,
+        &cfg.keys,
+    )?;
     let mut connected_before = false;
     let mut last_message_was_not_found = false;
 

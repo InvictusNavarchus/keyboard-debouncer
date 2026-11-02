@@ -10,10 +10,11 @@ import {
 
 const DAY_MS = 86_400_000;
 const DEFAULT_DB = "/var/lib/keyboard-debouncer/keys.db";
-const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N]
+const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N] [--latest-config]
 
   --db PATH  Tracker database (default: ${DEFAULT_DB})
   --days N   Rolling window in whole 24-hour days (default: 7)
+  --latest-config  Only the latest configuration period per keyboard (within --days)
   --help     Show this help
 
 Read-only report in local time, separated by keyboard.
@@ -31,6 +32,18 @@ interface Group extends Counts {
   label: string;
 }
 
+interface ConfigPeriod {
+  id: number;
+  started_at_ms: number;
+  threshold_ms: number;
+  short_hold_threshold_ms: number;
+  extended_threshold_ms: number;
+  micro_hold_threshold_ms: number;
+  micro_extended_threshold_ms: number;
+  debounce_all_keys: number;
+  target_keys: string;
+}
+
 interface Keyboard {
   id: number | null;
   identity: string | null;
@@ -43,6 +56,8 @@ export interface KeyboardReport {
   hourly: Group[];
   keys: Group[];
   timing: TimingReport;
+  periods: ConfigPeriod[];
+  unknownConfigPresses: number;
 }
 
 export function parseOptions(args: string[]) {
@@ -51,6 +66,7 @@ export function parseOptions(args: string[]) {
     options: {
       db: { type: "string", default: DEFAULT_DB },
       days: { type: "string", default: "7" },
+      "latest-config": { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
     strict: true,
@@ -65,7 +81,12 @@ export function parseOptions(args: string[]) {
     throw new Error("--days exceeds the supported date range.");
   }
   if (!values.db.trim()) throw new Error("--db requires a non-empty path.");
-  return { db: values.db, days, help: values.help };
+  return {
+    db: values.db,
+    days,
+    help: values.help,
+    latestConfig: values["latest-config"],
+  };
 }
 
 // The only dynamic SQL fragments are these internal expressions, never CLI input.
@@ -79,6 +100,7 @@ export function collectReports(
   db: Database,
   start: number,
   end: number,
+  latestConfig = false,
 ): KeyboardReport[] {
   // A consistent snapshot across all aggregates, even while the daemon writes.
   return db.transaction(() => {
@@ -86,26 +108,52 @@ export function collectReports(
       .query<{ name: string }, []>("PRAGMA table_info(key_events)")
       .all()
       .map((column) => column.name);
+    const hasPeriods = columns.includes("config_period_id");
+    if (latestConfig && !hasPeriods)
+      throw new Error(
+        "No configuration periods recorded; upgrade and restart the daemon first.",
+      );
     const hasIdentity = columns.includes("keyboard_id");
     const timingColumns = ["gap_ms", "hold_ms", "timing_version"]
       .map((name) => (columns.includes(name) ? name : `NULL AS ${name}`))
       .join(", ");
-    const keyboards = hasIdentity
+    const keyboards = latestConfig
       ? db
-          .query<Keyboard, [number, number]>(
-            `
+          .query<Keyboard, []>(
+            `SELECT k.id, k.identity FROM keyboards k
+          WHERE EXISTS (SELECT 1 FROM config_periods p WHERE p.keyboard_id = k.id) ORDER BY k.identity`,
+          )
+          .all()
+      : hasIdentity
+        ? db
+            .query<Keyboard, [number, number]>(
+              `
           SELECT DISTINCT e.keyboard_id AS id, k.identity
           FROM key_events e LEFT JOIN keyboards k ON k.id = e.keyboard_id
           WHERE e.value = 1 AND e.ts_ms >= ? AND e.ts_ms < ?
           ORDER BY k.identity, e.keyboard_id
         `,
-          )
-          .all(start, end)
-      : [{ id: null, identity: null }];
+            )
+            .all(start, end)
+        : [{ id: null, identity: null }];
 
+    if (latestConfig && keyboards.length === 0)
+      throw new Error("No configuration periods recorded.");
     return keyboards.flatMap((keyboard) => {
-      const filter = `value = 1 AND ts_ms >= ? AND ts_ms < ?${hasIdentity ? " AND keyboard_id IS ?" : ""}`;
+      const periods = hasPeriods
+        ? db
+            .query<ConfigPeriod, (number | null)[]>(
+              latestConfig
+                ? "SELECT * FROM config_periods WHERE keyboard_id IS ? ORDER BY id DESC LIMIT 1"
+                : `SELECT DISTINCT p.* FROM config_periods p JOIN key_events e ON e.config_period_id = p.id
+            WHERE e.keyboard_id IS ? AND e.ts_ms >= ? AND e.ts_ms < ? ORDER BY p.id`,
+            )
+            .all(...(latestConfig ? [keyboard.id] : [keyboard.id, start, end]))
+        : [];
+      const periodFilter = latestConfig ? " AND config_period_id = ?" : "";
+      const filter = `value = 1 AND ts_ms >= ? AND ts_ms < ?${hasIdentity ? " AND keyboard_id IS ?" : ""}${periodFilter}`;
       const parameters = hasIdentity ? [start, end, keyboard.id] : [start, end];
+      if (latestConfig) parameters.push(periods[0]?.id ?? null);
       const total = db
         .query<Counts, (number | null)[]>(
           `
@@ -115,7 +163,7 @@ export function collectReports(
       `,
         )
         .get(...parameters);
-      if (!total || total.presses === 0) return [];
+      if (!total || (total.presses === 0 && !latestConfig)) return [];
 
       const group = (kind: keyof typeof GROUPS): Group[] =>
         db
@@ -136,7 +184,7 @@ export function collectReports(
           `
         SELECT ts_ms, key, value, suppressed, ${timingColumns} FROM key_events
         WHERE ts_ms >= ? AND ts_ms < ? AND value IN (0, 1)
-        ${hasIdentity ? "AND keyboard_id IS ?" : ""}
+        ${hasIdentity ? "AND keyboard_id IS ?" : ""}${periodFilter}
         ORDER BY rowid
       `,
         )
@@ -153,6 +201,14 @@ export function collectReports(
           hourly: group("hourly"),
           keys,
           timing,
+          periods,
+          unknownConfigPresses: hasPeriods
+            ? (db
+                .query<{ count: number }, (number | null)[]>(
+                  `SELECT COUNT(*) AS count FROM key_events WHERE ${filter} AND config_period_id IS NULL`,
+                )
+                .get(...parameters)?.count ?? 0)
+            : total.presses,
         },
       ];
     });
@@ -242,6 +298,42 @@ export function formatReport(
       table("Overall", [{ label: "Total", ...report.total }]),
     );
 
+    if (report.periods.length > 0) {
+      sections.push(
+        "",
+        textTable([
+          [
+            "Config period",
+            "Base",
+            "Short hold",
+            "Extended",
+            "Micro hold",
+            "Micro extended",
+          ],
+          ...report.periods.map((p) => [
+            String(p.id),
+            ...[
+              p.threshold_ms,
+              p.short_hold_threshold_ms,
+              p.extended_threshold_ms,
+              p.micro_hold_threshold_ms,
+              p.micro_extended_threshold_ms,
+            ].map(String),
+          ]),
+        ]),
+      );
+      for (const p of report.periods)
+        sections.push(
+          `Period ${p.id} loaded ${new Date(p.started_at_ms).toLocaleString()}; debounce all: ${Boolean(p.debounce_all_keys)}; target keys: ${p.target_keys}`,
+        );
+      sections.push(
+        "Thresholds in ms. Multiple periods mean these totals combine settings.",
+      );
+    } else sections.push("Configuration history unavailable for these events.");
+    if (report.unknownConfigPresses > 0)
+      sections.push(
+        `Presses without recorded configuration: ${report.unknownConfigPresses}.`,
+      );
     const dates: string[] = [];
     const cursor = new Date(start);
     cursor.setHours(0, 0, 0, 0);
@@ -297,7 +389,7 @@ export function formatReport(
       "Gap decision is the next press; hold decision is the paired press. Auto-repeats ignored.",
       "Mono = stored monotonic durations; Approx = historical wall-clock reconstruction. Zero-ms samples retained.",
       "Samples are selected by event wall time; stored durations may start before this window. Approx pairs stay within it.",
-      "Restarts, recording gaps, and historical threshold changes are not identifiable; these statistics do not determine an ideal threshold.",
+      "Configuration periods record loaded settings; historical events without a reference have unknown settings. These statistics do not determine an ideal threshold.",
     );
   }
   return sections.join("\n");
@@ -313,7 +405,13 @@ if (import.meta.main) {
       const start = end - options.days * DAY_MS;
       const db = new Database(options.db, { readonly: true, strict: true });
       try {
-        console.log(formatReport(collectReports(db, start, end), start, end));
+        console.log(
+          formatReport(
+            collectReports(db, start, end, options.latestConfig),
+            start,
+            end,
+          ),
+        );
       } finally {
         db.close();
       }

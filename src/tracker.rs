@@ -1,5 +1,6 @@
+use crate::config::DebounceConfig;
 use evdev::KeyCode;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::thread;
@@ -29,6 +30,8 @@ impl Tracker {
     pub fn new(
         db_path: Option<PathBuf>,
         identity: Option<&str>,
+        config: &DebounceConfig,
+        keys: &[KeyCode],
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let Some(path) = db_path else {
             return Ok(Self { sender: None });
@@ -43,11 +46,12 @@ impl Tracker {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         let keyboard_id = initialize_database(&mut conn, identity)?;
+        let period_id = resolve_period(&mut conn, keyboard_id, config, keys, SystemTime::now())?;
 
         // Resolve identity once; the worker writes only its integer ID with each event.
         let (tx, rx) = sync_channel::<TrackEvent>(10000);
         thread::spawn(move || {
-            record_events(&mut conn, keyboard_id, rx);
+            record_events(&mut conn, keyboard_id, Some(period_id), rx);
         });
 
         Ok(Self { sender: Some(tx) })
@@ -97,6 +101,15 @@ fn initialize_database(conn: &mut Connection, identity: &str) -> rusqlite::Resul
             id INTEGER PRIMARY KEY,
             identity TEXT NOT NULL UNIQUE
         );
+        CREATE TABLE IF NOT EXISTS config_periods (
+            id INTEGER PRIMARY KEY, keyboard_id INTEGER NOT NULL REFERENCES keyboards(id),
+            started_at_ms INTEGER NOT NULL,
+            threshold_ms INTEGER NOT NULL, short_hold_threshold_ms INTEGER NOT NULL,
+            extended_threshold_ms INTEGER NOT NULL, micro_hold_threshold_ms INTEGER NOT NULL,
+            micro_extended_threshold_ms INTEGER NOT NULL,
+            debounce_all_keys INTEGER NOT NULL, target_keys TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_config_periods_keyboard ON config_periods(keyboard_id, id);
         CREATE TABLE IF NOT EXISTS key_events (
             ts_ms INTEGER NOT NULL,
             key TEXT NOT NULL,
@@ -117,6 +130,7 @@ fn initialize_database(conn: &mut Connection, identity: &str) -> rusqlite::Resul
         )?;
     }
     for (name, sql) in [
+        ("config_period_id", "ALTER TABLE key_events ADD COLUMN config_period_id INTEGER REFERENCES config_periods(id)"),
         ("gap_ms", "ALTER TABLE key_events ADD COLUMN gap_ms REAL"),
         ("hold_ms", "ALTER TABLE key_events ADD COLUMN hold_ms REAL"),
         (
@@ -141,9 +155,69 @@ fn initialize_database(conn: &mut Connection, identity: &str) -> rusqlite::Resul
     Ok(id)
 }
 
+// Compare only the latest period for this keyboard: A -> B -> A is three trials.
+fn resolve_period(
+    conn: &mut Connection,
+    keyboard_id: i64,
+    config: &DebounceConfig,
+    keys: &[KeyCode],
+    now: SystemTime,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let mut names: Vec<String> = if config.debounce_all {
+        Vec::new()
+    } else {
+        keys.iter().map(|key| format!("\"{key:?}\"")).collect()
+    };
+    names.sort();
+    names.dedup();
+    let targets = format!("[{}]", names.join(","));
+    let threshold_ms = i64::try_from(config.threshold_ms)?;
+    let short_hold_threshold_ms = i64::try_from(config.short_hold_threshold_ms)?;
+    let extended_threshold_ms = i64::try_from(config.extended_threshold_ms)?;
+    let micro_hold_threshold_ms = i64::try_from(config.micro_hold_threshold_ms)?;
+    let micro_extended_threshold_ms = i64::try_from(config.micro_extended_threshold_ms)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let settings = params![
+        keyboard_id,
+        threshold_ms,
+        short_hold_threshold_ms,
+        extended_threshold_ms,
+        micro_hold_threshold_ms,
+        micro_extended_threshold_ms,
+        config.debounce_all,
+        targets
+    ];
+    let existing = tx
+        .query_row(
+            "SELECT id FROM config_periods
+        WHERE id = (SELECT id FROM config_periods WHERE keyboard_id = ?1 ORDER BY id DESC LIMIT 1)
+        AND threshold_ms = ?2 AND short_hold_threshold_ms = ?3 AND extended_threshold_ms = ?4
+        AND micro_hold_threshold_ms = ?5 AND micro_extended_threshold_ms = ?6
+        AND debounce_all_keys = ?7 AND target_keys = ?8",
+            settings,
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    let id = if let Some(id) = existing {
+        id
+    } else {
+        let started = i64::try_from(now.duration_since(UNIX_EPOCH)?.as_millis())?;
+        tx.execute("INSERT INTO config_periods (keyboard_id, threshold_ms, short_hold_threshold_ms,
+            extended_threshold_ms, micro_hold_threshold_ms, micro_extended_threshold_ms,
+            debounce_all_keys, target_keys, started_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![keyboard_id, threshold_ms, short_hold_threshold_ms,
+                extended_threshold_ms, micro_hold_threshold_ms,
+                micro_extended_threshold_ms, config.debounce_all, targets, started])?;
+        tx.last_insert_rowid()
+    };
+    tx.commit()?;
+    Ok(id)
+}
+
 fn record_events(
     conn: &mut Connection,
     keyboard_id: i64,
+    period_id: Option<i64>,
     rx: std::sync::mpsc::Receiver<TrackEvent>,
 ) {
     // Read from channel and insert in batches
@@ -172,8 +246,8 @@ fn record_events(
         let mut success = true;
         {
             if let Ok(mut stmt) = tx_conn.prepare_cached(
-                "INSERT INTO key_events (ts_ms, key, value, suppressed, keyboard_id, gap_ms, hold_ms, timing_version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+                "INSERT INTO key_events (ts_ms, key, value, suppressed, keyboard_id, gap_ms, hold_ms, timing_version, config_period_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
             ) {
                 for ev in &buffer {
                     if let Err(e) = stmt.execute(params![
@@ -183,7 +257,8 @@ fn record_events(
                         if ev.suppressed { 1 } else { 0 },
                         keyboard_id,
                         ev.timing.gap.map(|d| d.as_secs_f64() * 1000.0),
-                        ev.timing.hold.map(|d| d.as_secs_f64() * 1000.0)
+                        ev.timing.hold.map(|d| d.as_secs_f64() * 1000.0),
+                        period_id
                     ]) {
                         eprintln!("Tracker: Failed to insert event: {}", e);
                         success = false;
@@ -210,6 +285,18 @@ fn record_events(
 mod tests {
     use super::*;
 
+    fn config() -> DebounceConfig {
+        DebounceConfig {
+            threshold_ms: 30,
+            short_hold_threshold_ms: 70,
+            extended_threshold_ms: 100,
+            micro_hold_threshold_ms: 20,
+            micro_extended_threshold_ms: 150,
+            debounce_all: false,
+            log_forward: false,
+        }
+    }
+
     fn record(conn: &mut Connection, id: i64, suppressed: bool) {
         let (tx, rx) = sync_channel(10);
         tx.send(TrackEvent {
@@ -221,7 +308,7 @@ mod tests {
         })
         .unwrap();
         drop(tx);
-        record_events(conn, id, rx);
+        record_events(conn, id, None, rx);
     }
 
     #[test]
@@ -300,6 +387,15 @@ mod tests {
         record(&mut conn, id, false);
         let old = conn.query_row("SELECT ts_ms, key, value, suppressed, keyboard_id FROM key_events WHERE ts_ms = 42", [], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i32>(2)?, r.get::<_, i32>(3)?, r.get::<_, Option<i64>>(4)?))).unwrap();
         assert_eq!(old, (42, "KEY_B".into(), 0, 1, None));
+        assert_eq!(
+            conn.query_row(
+                "SELECT config_period_id FROM key_events WHERE ts_ms = 42",
+                [],
+                |r| r.get::<_, Option<i64>>(0)
+            )
+            .unwrap(),
+            None
+        );
         assert!(conn
             .execute("INSERT INTO key_events (ts_ms, key, value, suppressed, keyboard_id) VALUES (0, 'KEY_A', 1, 0, 999)", [])
             .is_err());
@@ -339,8 +435,117 @@ mod tests {
     }
 
     #[test]
+    fn periods_follow_effective_changes_per_keyboard_and_events_keep_their_period() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let keyboard = initialize_database(&mut conn, "desk").unwrap();
+        let other = initialize_database(&mut conn, "travel").unwrap();
+        let mut cfg = config();
+        let now = UNIX_EPOCH + Duration::from_millis(1000);
+        let keys = [KeyCode::KEY_N, KeyCode::KEY_A];
+        let first = resolve_period(&mut conn, keyboard, &cfg, &keys, now).unwrap();
+        cfg.log_forward = true;
+        assert_eq!(
+            resolve_period(
+                &mut conn,
+                keyboard,
+                &cfg,
+                &[KeyCode::KEY_A, KeyCode::KEY_N, KeyCode::KEY_A],
+                now + Duration::from_secs(1)
+            )
+            .unwrap(),
+            first
+        );
+        let travel = resolve_period(&mut conn, other, &cfg, &keys, now).unwrap();
+        assert_ne!(travel, first);
+        cfg.micro_hold_threshold_ms = 30;
+        let second = resolve_period(&mut conn, keyboard, &cfg, &keys, now).unwrap();
+        assert_ne!(first, second);
+        cfg.micro_hold_threshold_ms = 20;
+        let third = resolve_period(&mut conn, keyboard, &cfg, &keys, now).unwrap();
+        assert_ne!(third, first);
+        assert_ne!(third, second);
+        let started: i64 = conn
+            .query_row(
+                "SELECT started_at_ms FROM config_periods WHERE id = ?",
+                [first],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(started, 1000);
+        cfg.debounce_all = true;
+        let all = resolve_period(&mut conn, keyboard, &cfg, &keys, now).unwrap();
+        assert_eq!(
+            resolve_period(&mut conn, keyboard, &cfg, &[], now).unwrap(),
+            all
+        );
+        // Cached period IDs, rather than timestamps or the latest global period,
+        // attribute events even when settings change or the wall clock moves.
+        for period in [first, second, third] {
+            let (tx, rx) = sync_channel(1);
+            tx.send(TrackEvent {
+                ts_ms: 123,
+                key: KeyCode::KEY_N,
+                value: 1,
+                suppressed: false,
+                timing: EventTiming::default(),
+            })
+            .unwrap();
+            drop(tx);
+            record_events(&mut conn, keyboard, Some(period), rx);
+        }
+        let linked: Vec<i64> = conn
+            .prepare("SELECT config_period_id FROM key_events ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(linked, vec![first, second, third]);
+        assert_eq!(initialize_database(&mut conn, "desk").unwrap(), keyboard);
+    }
+
+    #[test]
+    fn every_filter_setting_can_start_a_new_period() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let id = initialize_database(&mut conn, "desk").unwrap();
+        let mut cfg = config();
+        let now = UNIX_EPOCH;
+        let mut previous = resolve_period(&mut conn, id, &cfg, &[], now).unwrap();
+        for index in 0..5 {
+            match index {
+                0 => cfg.threshold_ms += 1,
+                1 => cfg.short_hold_threshold_ms += 1,
+                2 => cfg.extended_threshold_ms += 1,
+                3 => cfg.micro_hold_threshold_ms += 1,
+                _ => cfg.micro_extended_threshold_ms += 1,
+            }
+            let next = resolve_period(&mut conn, id, &cfg, &[], now).unwrap();
+            assert_ne!(previous, next);
+            previous = next;
+        }
+        assert_ne!(
+            previous,
+            resolve_period(&mut conn, id, &cfg, &[KeyCode::KEY_A], now).unwrap()
+        );
+        assert!(resolve_period(
+            &mut conn,
+            id,
+            &DebounceConfig {
+                threshold_ms: u64::MAX,
+                ..cfg
+            },
+            &[],
+            now
+        )
+        .is_err());
+    }
+
+    #[test]
     fn disabled_tracking_needs_no_identity() {
-        assert!(Tracker::new(None, None).unwrap().sender.is_none());
+        assert!(Tracker::new(None, None, &config(), &[])
+            .unwrap()
+            .sender
+            .is_none());
     }
 
     #[test]
@@ -391,7 +596,7 @@ mod tests {
             EventTiming::default(),
         );
         drop(tracker);
-        record_events(&mut conn, id, rx);
+        record_events(&mut conn, id, None, rx);
         let rows: Vec<(i64, Option<f64>, Option<f64>, i64)> = conn.prepare(
             "SELECT ts_ms, gap_ms, hold_ms, timing_version FROM key_events WHERE timing_version = 1 ORDER BY rowid"
         ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
@@ -408,9 +613,14 @@ mod tests {
     #[test]
     fn tracking_rejects_missing_or_blank_identity_before_opening_database() {
         for identity in [None, Some(""), Some("   ")] {
-            let err = Tracker::new(Some(PathBuf::from("/nonexistent/keys.db")), identity)
-                .err()
-                .unwrap();
+            let err = Tracker::new(
+                Some(PathBuf::from("/nonexistent/keys.db")),
+                identity,
+                &config(),
+                &[],
+            )
+            .err()
+            .unwrap();
             assert!(err.to_string().contains("KEYBOARD_ID"));
         }
     }

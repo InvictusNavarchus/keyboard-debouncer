@@ -274,3 +274,49 @@ test("CLI reads a live WAL database, honors timezone, and never creates missing 
   expect(existsSync(missing)).toBe(false);
   expect(db.query("SELECT * FROM key_events").all()).toHaveLength(1);
 });
+
+test("latest config isolates the newest period per keyboard, including an empty trial", () => {
+  const db = fixture();
+  db.exec(`CREATE TABLE config_periods (
+    id INTEGER PRIMARY KEY, keyboard_id INTEGER, started_at_ms INTEGER,
+    threshold_ms INTEGER, short_hold_threshold_ms INTEGER, extended_threshold_ms INTEGER,
+    micro_hold_threshold_ms INTEGER, micro_extended_threshold_ms INTEGER,
+    debounce_all_keys INTEGER, target_keys TEXT);
+    ALTER TABLE key_events ADD COLUMN config_period_id INTEGER;
+  `);
+  const period = db.query(
+    "INSERT INTO config_periods VALUES (?, ?, ?, 30, 70, 100, ?, 150, 1, '[]')",
+  );
+  period.run(1, 1, start, 20);
+  period.run(2, 1, start + 100, 30);
+  period.run(3, 1, start + 200, 20);
+  period.run(4, 2, start + 300, 20);
+  const insert = db.query(
+    "INSERT INTO key_events VALUES (?, 'KEY_A', 1, ?, 1, ?)",
+  );
+  insert.run(start, 0, null);
+  insert.run(start + 10, 1, 1);
+  insert.run(start + 110, 1, 2);
+  insert.run(start + 210, 0, 3);
+  const all = collectReports(db, start, end);
+  expect(all[0]?.total).toEqual({ presses: 4, suppressed: 2 });
+  expect(all[0]?.unknownConfigPresses).toBe(1);
+  expect(all[0]?.periods.map((p) => p.id)).toEqual([1, 2, 3]);
+  const latest = collectReports(db, start, end, true);
+  expect(latest).toHaveLength(2);
+  expect(latest[0]?.periods.map((p) => p.id)).toEqual([3]);
+  expect(latest[0]?.total).toEqual({ presses: 1, suppressed: 0 });
+  expect(latest[0]?.unknownConfigPresses).toBe(0);
+  expect(latest[1]?.periods.map((p) => p.id)).toEqual([4]);
+  expect(latest[1]?.total.presses).toBe(0);
+  expect(formatReport(latest, start, end)).toContain("Period 3 loaded");
+  expect(collectReports(db, start + 220, end, true)[0]?.total.presses).toBe(0);
+  expect(parseOptions(["--latest-config"]).latestConfig).toBe(true);
+});
+
+test("latest config explains when the daemon has no configuration history", () => {
+  const db = fixture();
+  expect(() => collectReports(db, start, end, true)).toThrow(
+    "No configuration periods recorded",
+  );
+});

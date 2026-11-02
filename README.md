@@ -390,6 +390,26 @@ ORDER BY e.ts_ms DESC
 LIMIT 20;
 ```
 
+### Configuration history
+
+When tracking is enabled, startup records the effective debounce settings in
+`config_periods`. Each period contains its keyboard reference, load timestamp,
+five thresholds, debounce-all mode, and a sorted JSON array of target keys.
+Settings resolve once at startup; each event stores only `config_period_id`.
+No event index is added for that reference.
+
+The daemon compares settings with the latest period for that keyboard. Identical
+settings reuse it, including across restarts; changing any filtering setting starts
+a new period. Returning to an older setting creates another period, so `20 → 30 →
+20` remains three distinct tuning attempts. Key ordering, duplicate keys, and log
+preferences do not start periods. Target keys are recorded as `[]` when debounce-all
+mode makes that list irrelevant. Period IDs are generated automatically by SQLite.
+
+Edit the configuration and restart to apply changes. `started_at_ms` is when the
+settings were loaded, not when the file was edited. Migration leaves historical
+event references null; their settings cannot be inferred. Periods are immutable.
+This assumes one daemon writer per physical keyboard, as in the service setup.
+
 ### Compact health report (Bun)
 
 With [Bun](https://bun.sh) installed, run the read-only analytics helper. No package
@@ -407,11 +427,19 @@ service's private database, use the shortcut from the repository root:
 ```bash
 bun run analyze
 bun run analyze --days 14
+bun run analyze --latest-config
 ```
 
 The shortcut runs the report through `sudo`, using your Bun executable's full path
 so Bun does not need to be on sudo's PATH. It may prompt for your password. All
 arguments are forwarded; use `--db PATH` to override the default database.
+
+Use `--latest-config` to report only the newest configuration period for each
+keyboard, intersected with the `--days` window. Empty latest periods show zero
+presses instead of falling back to older results. The report displays the period
+ID, load time, and settings. Without this flag, the report combines periods in the
+window, lists their settings, and counts presses with unknown configurations.
+Legacy databases remain readable; latest-period mode requires recorded periods.
 
 The default window is the past **7 × 24 hours**, ending when the report starts.
 `--days` accepts a positive whole number. Each keyboard gets its own report:
@@ -454,9 +482,9 @@ reliably in historical data.
 
 Use the gap distributions to assess debounce windows, and hold distributions to
 assess micro/short hold cutoffs. Forwarded does not guarantee intentional typing,
-and suppressed does not guarantee hardware chatter. Historical threshold changes
-are not recorded, so these statistics describe observed events rather than provide
-an automatic ideal threshold.
+and suppressed does not guarantee hardware chatter. For historical events without a
+configuration reference, threshold changes are unknown. These statistics describe observed events rather than provide an automatic
+ideal threshold.
 
 **Suppression rate = suppressed key-downs / all recorded key-downs.** Releases and
 auto-repeats are excluded. This measures the daemon's decisions, including possible
