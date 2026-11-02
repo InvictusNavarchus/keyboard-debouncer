@@ -10,11 +10,12 @@ import {
 
 const DAY_MS = 86_400_000;
 const DEFAULT_DB = "/var/lib/keyboard-debouncer/keys.db";
-const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N] [--latest-config]
+const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N] [--latest-config] [--details]
 
   --db PATH  Tracker database (default: ${DEFAULT_DB})
   --days N   Rolling window in whole 24-hour days (default: 7)
   --latest-config  Only the latest configuration period per keyboard (within --days)
+  --details  Include per-key timing tables for the top affected keys
   --help     Show this help
 
 Read-only report in local time, separated by keyboard.
@@ -67,6 +68,7 @@ export function parseOptions(args: string[]) {
       db: { type: "string", default: DEFAULT_DB },
       days: { type: "string", default: "7" },
       "latest-config": { type: "boolean", default: false },
+      details: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
     strict: true,
@@ -86,6 +88,7 @@ export function parseOptions(args: string[]) {
     days,
     help: values.help,
     latestConfig: values["latest-config"],
+    details: values.details,
   };
 }
 
@@ -276,6 +279,7 @@ export function formatReport(
   reports: KeyboardReport[],
   start: number,
   end: number,
+  details = false,
 ): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const sections = [
@@ -380,8 +384,10 @@ export function formatReport(
         ]),
       ]),
     );
-    for (const key of report.timing.keys) {
-      sections.push("", timingTable(`${key.key} timing (ms)`, key.stats));
+    if (details) {
+      for (const key of report.timing.keys) {
+        sections.push("", timingTable(`${key.key} timing (ms)`, key.stats));
+      }
     }
     sections.push(
       `Timing samples skipped: ${report.timing.skippedGaps} gaps, ${report.timing.skippedHolds} holds (missing, incomplete, inconsistent, or negative pairs).`,
@@ -410,6 +416,7 @@ if (import.meta.main) {
             collectReports(db, start, end, options.latestConfig),
             start,
             end,
+            options.details,
           ),
         );
       } finally {

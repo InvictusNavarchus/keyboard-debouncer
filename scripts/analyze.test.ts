@@ -154,7 +154,14 @@ test("timing reconstruction stays within the window and keyboard, using recordin
       ?.median,
   ).toBe(20);
   const text = formatReport(reports, start, end);
-  expect(text).toContain("KEY_A timing (ms)");
+  expect(text).not.toContain("KEY_A timing (ms)");
+  expect(text).toContain("Top keys (by suppressed count)");
+  expect(text).toContain("Timing overall (ms)");
+  expect(formatReport(reports, start, end, true)).toContain(
+    "KEY_A timing (ms)",
+  );
+  expect(parseOptions([]).details).toBe(false);
+  expect(parseOptions(["--details", "--latest-config"]).details).toBe(true);
   expect(text).toContain("Gap buckets (ms)");
   expect(text).toContain("Timing samples skipped: 2 gaps, 2 holds");
 });

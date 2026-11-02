@@ -428,6 +428,8 @@ service's private database, use the shortcut from the repository root:
 bun run analyze
 bun run analyze --days 14
 bun run analyze --latest-config
+bun run analyze --details
+bun run analyze --latest-config --details
 ```
 
 The shortcut runs the report through `sudo`, using your Bun executable's full path
@@ -451,7 +453,9 @@ The default window is the past **7 × 24 hours**, ending when the report starts.
 - Top 10 affected keys ranked by suppressed count, with total presses and per-key
   rates so low-volume keys have context.
 - Gap and hold sample counts, minimum, p5, median, p95, and maximum in milliseconds,
-  separately for forwarded and suppressed presses, overall and for each top key.
+  separately for forwarded and suppressed presses, overall. Add `--details` to
+  include timing tables for each top affected key; the compact top-keys ranking
+  is always displayed when suppressions exist.
   `Mono` counts stored monotonic samples; `Approx` counts reconstructed historical
   samples. `Samples` is their sum; distributions and histograms combine both.
 - Overall gap histogram with buckets `<20`, `20–<30`, `30–<70`, `70–<100`,
