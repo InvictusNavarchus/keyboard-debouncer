@@ -38,12 +38,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("  log fwd   : {}", cfg.debounce.log_forward);
     if let Some(db) = &cfg.track_db {
         println!("  tracker   : {}", db.display());
+        println!(
+            "  keyboard ID: {}",
+            cfg.keyboard_id.as_deref().unwrap_or("(missing)")
+        );
     } else {
         println!("  tracker   : (disabled)");
     }
     println!();
 
-    let tracker = tracker::Tracker::new(cfg.track_db.clone());
+    let tracker = tracker::Tracker::new(cfg.track_db.clone(), cfg.keyboard_id.as_deref())?;
     let mut connected_before = false;
     let mut last_message_was_not_found = false;
 
