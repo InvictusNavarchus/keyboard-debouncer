@@ -1,0 +1,14 @@
+{
+  "name": "keyboard-debouncer-analytics",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "TZ=UTC bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  }
+}

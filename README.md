@@ -373,6 +373,57 @@ ORDER BY e.ts_ms DESC
 LIMIT 20;
 ```
 
+### Compact health report (Bun)
+
+With [Bun](https://bun.sh) installed, run the read-only analytics helper. No package
+installation is needed to run it:
+
+```bash
+bun scripts/analyze.ts --db /path/to/keys.db
+bun scripts/analyze.ts --db /path/to/keys.db --days 14
+bun scripts/analyze.ts --help
+```
+
+The database path defaults to `/var/lib/keyboard-debouncer/keys.db`. The service's
+private database requires elevated read access; use your Bun executable's full
+path if it is not on sudo's PATH:
+
+```bash
+sudo "$(command -v bun)" scripts/analyze.ts
+```
+
+The default window is the past **7 × 24 hours**, ending when the report starts.
+`--days` accepts a positive whole number. Each keyboard gets its own report:
+
+- Overall presses, suppressed presses, and suppression rate.
+- Daily totals in local time, including dates with no recorded presses. The first
+  and last dates may cover only part of a day.
+- All 24 local hours, combining the same hour across dates to reveal patterns.
+- Top 10 affected keys ranked by suppressed count, with total presses and per-key
+  rates so low-volume keys have context.
+
+**Suppression rate = suppressed key-downs / all recorded key-downs.** Releases and
+auto-repeats are excluded. This measures the daemon's decisions, including possible
+false positives, rather than confirmed hardware faults. Keys outside the configured
+debounce targets also contribute to the denominator. Comparisons across configuration
+changes therefore need care. A missing recording cannot distinguish idle time from
+a stopped tracker. A zero denominator displays `—`.
+
+Historical records without a keyboard identity are reported separately. Databases
+from before identity tracking are supported without migration. Queries use a
+consistent read-only snapshot and work while the daemon records in WAL mode.
+Time grouping uses the machine's local timezone; set `TZ=UTC` before running Bun
+if you prefer UTC.
+
+To develop or validate the helper (development dependencies only):
+
+```bash
+cd scripts
+bun install --frozen-lockfile
+bun run typecheck
+bun run test
+```
+
 ## License
 
 This app is licensed under GPLv3
