@@ -115,6 +115,50 @@ test("empty windows are explicit and zero denominators are not reported as 0%", 
   expect(rate({ presses: 0, suppressed: 0 })).toBe("—");
 });
 
+test("timing reconstruction stays within the window and keyboard, using recording order", () => {
+  const db = fixture();
+  const insert = db.query("INSERT INTO key_events VALUES (?, ?, ?, ?, ?)");
+  insert.run(start - 20, "KEY_A", 1, 0, 1);
+  insert.run(start - 10, "KEY_A", 0, 0, 1);
+  insert.run(start, "KEY_A", 1, 0, 1);
+  insert.run(start, "KEY_A", 0, 0, 1);
+  insert.run(start + 20, "KEY_A", 1, 1, 1);
+  insert.run(start + 10, "KEY_A", 0, 1, 1);
+  insert.run(start + 30, "KEY_A", 1, 0, 2);
+  insert.run(start + 50, "KEY_A", 0, 0, 2);
+  insert.run(end - 1, "KEY_B", 1, 0, 1);
+  insert.run(end, "KEY_B", 0, 0, 1);
+  const reports = collectReports(db, start, end);
+  const desk = reports.find((report) => report.keyboard.id === 1);
+  const travel = reports.find((report) => report.keyboard.id === 2);
+  expect(
+    desk?.timing.overall.find((row) => row.category === "Forwarded hold")
+      ?.median,
+  ).toBe(0);
+  expect(
+    desk?.timing.overall.find((row) => row.category === "Suppressed gap")
+      ?.median,
+  ).toBe(20);
+  expect(
+    desk?.timing.overall.find((row) => row.category === "Suppressed hold")
+      ?.count,
+  ).toBe(0);
+  expect(desk?.timing.skippedGaps).toBe(2);
+  expect(desk?.timing.skippedHolds).toBe(2);
+  expect(
+    travel?.timing.overall.find((row) => row.category === "Forwarded gap")
+      ?.count,
+  ).toBe(0);
+  expect(
+    travel?.timing.overall.find((row) => row.category === "Forwarded hold")
+      ?.median,
+  ).toBe(20);
+  const text = formatReport(reports, start, end);
+  expect(text).toContain("KEY_A timing (ms)");
+  expect(text).toContain("Gap buckets (ms)");
+  expect(text).toContain("Timing samples skipped: 2 gaps, 2 holds");
+});
+
 test("CLI validates arguments and help works without opening a database", () => {
   expect(parseOptions([]).days).toBe(7);
   expect(parseOptions(["--days", "14"]).days).toBe(14);

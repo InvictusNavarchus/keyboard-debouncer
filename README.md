@@ -405,6 +405,32 @@ The default window is the past **7 × 24 hours**, ending when the report starts.
 - All 24 local hours, combining the same hour across dates to reveal patterns.
 - Top 10 affected keys ranked by suppressed count, with total presses and per-key
   rates so low-volume keys have context.
+- Gap and hold sample counts, minimum, p5, median, p95, and maximum in milliseconds,
+  separately for forwarded and suppressed presses, overall and for each top key.
+- Overall gap histogram with buckets `<20`, `20–<30`, `30–<70`, `70–<100`,
+  `100–<150`, and `≥150` ms. Counts separate forwarded and suppressed presses.
+
+**Gap** means the same key's physical release → next press, including suppressed
+releases; it is not the interval between two presses. Gap samples are classified
+by the next press's decision. **Hold** means a press → its matching release,
+classified by that press's decision. Auto-repeats do not affect either measurement.
+Percentiles use linear interpolation; empty samples display `—`. Zero-ms durations
+are retained because events can share a stored millisecond. Long idle gaps remain
+included, so use the histogram alongside percentiles when tuning debounce windows.
+
+Timings are reconstructed from integer wall-clock timestamps, in recording order,
+using only events inside the selected window. Pairs are kept separate by keyboard
+and key. Missing preceding releases, incomplete holds, inconsistent press/release
+decisions, and negative durations are skipped and counted. The first press per key
+usually has no gap sample. Events outside the window are not used to complete pairs.
+Restarts, lost recordings, and wall-clock changes that leave plausible positive
+durations cannot be identified reliably from this schema.
+
+Use the gap distributions to assess debounce windows, and hold distributions to
+assess micro/short hold cutoffs. Forwarded does not guarantee intentional typing,
+and suppressed does not guarantee hardware chatter. Historical threshold changes
+are not recorded, so these statistics describe observed events rather than provide
+an automatic ideal threshold.
 
 **Suppression rate = suppressed key-downs / all recorded key-downs.** Releases and
 auto-repeats are excluded. This measures the daemon's decisions, including possible

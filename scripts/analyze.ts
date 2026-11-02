@@ -1,5 +1,12 @@
 import { Database } from "bun:sqlite";
 import { parseArgs } from "node:util";
+import {
+  collectTimings,
+  GAP_BUCKETS,
+  type TimingEvent,
+  type TimingReport,
+  type TimingStats,
+} from "./timing.ts";
 
 const DAY_MS = 86_400_000;
 const DEFAULT_DB = "/var/lib/keyboard-debouncer/keys.db";
@@ -11,7 +18,8 @@ const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N]
 
 Read-only report in local time, separated by keyboard.
 Suppression rate = suppressed key-downs / all key-downs.
-Releases and auto-repeats are excluded.`;
+Releases and auto-repeats are excluded from press counts.
+Gap/hold statistics reconstruct millisecond timings from recorded event pairs.`;
 
 interface Counts {
   presses: number;
@@ -33,6 +41,7 @@ export interface KeyboardReport {
   daily: Group[];
   hourly: Group[];
   keys: Group[];
+  timing: TimingReport;
 }
 
 export function parseOptions(args: string[]) {
@@ -116,13 +125,29 @@ export function collectReports(
           )
           .all(...parameters);
 
+      const keys = group("keys");
+      const events = db
+        .query<TimingEvent, (number | null)[]>(
+          `
+        SELECT ts_ms, key, value, suppressed FROM key_events
+        WHERE ts_ms >= ? AND ts_ms < ? AND value IN (0, 1)
+        ${hasIdentity ? "AND keyboard_id IS ?" : ""}
+        ORDER BY rowid
+      `,
+        )
+        .iterate(...parameters);
+      const timing = collectTimings(
+        events,
+        keys.map((key) => key.label),
+      );
       return [
         {
           keyboard,
           total,
           daily: group("daily"),
           hourly: group("hourly"),
-          keys: group("keys"),
+          keys,
+          timing,
         },
       ];
     });
@@ -140,7 +165,7 @@ export function rate(counts: Counts): string {
 }
 
 function table(title: string, rows: Group[]): string {
-  const lines = [
+  return textTable([
     [title, "Presses", "Suppressed", "Rate"],
     ...rows.map((row) => [
       row.label,
@@ -148,9 +173,15 @@ function table(title: string, rows: Group[]): string {
       String(row.suppressed),
       rate(row),
     ]),
-  ];
-  const widths = [0, 1, 2, 3].map((index) =>
-    Math.max(...lines.map((line) => (line[index] ?? "").length)),
+  ]);
+}
+
+function textTable(lines: string[][]): string {
+  const widths = (lines[0] ?? []).map((_, index) =>
+    lines.reduce(
+      (width, line) => Math.max(width, (line[index] ?? "").length),
+      0,
+    ),
   );
   return lines
     .map((line) =>
@@ -163,6 +194,19 @@ function table(title: string, rows: Group[]): string {
         .join("  "),
     )
     .join("\n");
+}
+
+function timingTable(title: string, stats: TimingStats[]): string {
+  const ms = (value: number | null) =>
+    value === null ? "—" : value.toFixed(1);
+  return textTable([
+    [title, "Samples", "Min", "p5", "Median", "p95", "Max"],
+    ...stats.map((row) => [
+      row.category,
+      String(row.count),
+      ...[row.min, row.p5, row.median, row.p95, row.max].map(ms),
+    ]),
+  ]);
 }
 
 export function formatReport(
@@ -222,6 +266,30 @@ export function formatReport(
       report.keys.length > 0
         ? table("Top keys (by suppressed count)", report.keys)
         : "No suppressed key-downs.",
+    );
+    sections.push(
+      "",
+      timingTable("Timing overall (ms)", report.timing.overall),
+    );
+    sections.push(
+      "",
+      textTable([
+        ["Gap buckets (ms)", ...GAP_BUCKETS],
+        ...report.timing.gapHistogram.map((row) => [
+          row.decision,
+          ...row.counts.map(String),
+        ]),
+      ]),
+    );
+    for (const key of report.timing.keys) {
+      sections.push("", timingTable(`${key.key} timing (ms)`, key.stats));
+    }
+    sections.push(
+      `Timing samples skipped: ${report.timing.skippedGaps} gaps, ${report.timing.skippedHolds} holds (missing, incomplete, inconsistent, or negative pairs).`,
+      "Gap = same-key UP → DN, including suppressed UPs; hold = matching DN → UP.",
+      "Gap decision is the next press; hold decision is the paired press. Auto-repeats ignored.",
+      "Approximate wall-clock timings; pairs stay within this window. Zero-ms samples retained.",
+      "Restarts, recording gaps, and historical threshold changes are not identifiable; these statistics do not determine an ideal threshold.",
     );
   }
   return sections.join("\n");
