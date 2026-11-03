@@ -13,12 +13,13 @@ const DEFAULT_DB = "/var/lib/keyboard-debouncer/keys.db";
 const HELP = `Usage: bun scripts/analyze.ts [--db PATH] [--days N] [--latest-config] [--details]
 
   --db PATH  Tracker database (default: ${DEFAULT_DB})
-  --days N   Rolling window in whole 24-hour days (default: 7)
-  --latest-config  Only the latest configuration period per keyboard (within --days)
+  --days N   Override today with a rolling window in whole 24-hour days
+  --latest-config  Only the latest configuration period per keyboard (within the window)
   --details  Include per-key timing tables for the top affected keys
   --help     Show this help
 
 Read-only report in local time, separated by keyboard.
+Default window: local midnight today through the report start time.
 Suppression rate = suppressed key-downs / all key-downs.
 Releases and auto-repeats are excluded from press counts.
 Gap/hold statistics use recorded monotonic durations where available.
@@ -61,12 +62,12 @@ export interface KeyboardReport {
   unknownConfigPresses: number;
 }
 
-export function parseOptions(args: string[]) {
+export function parseOptions(args: string[], end = Date.now()) {
   const { values } = parseArgs({
     args,
     options: {
       db: { type: "string", default: DEFAULT_DB },
-      days: { type: "string", default: "7" },
+      days: { type: "string" },
       "latest-config": { type: "boolean", default: false },
       details: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
@@ -74,11 +75,17 @@ export function parseOptions(args: string[]) {
     strict: true,
     allowPositionals: false,
   });
-  const days = Number(values.days);
-  if (!/^\d+$/.test(values.days) || !Number.isSafeInteger(days) || days < 1) {
-    throw new Error("--days must be a positive whole number.");
+  let days: number | undefined;
+  if (values.days !== undefined) {
+    days = Number(values.days);
+    if (!/^\d+$/.test(values.days) || !Number.isSafeInteger(days) || days < 1) {
+      throw new Error("--days must be a positive whole number.");
+    }
   }
-  const start = Date.now() - days * DAY_MS;
+  const start =
+    days === undefined
+      ? new Date(end).setHours(0, 0, 0, 0)
+      : end - days * DAY_MS;
   if (!Number.isFinite(new Date(start).getTime())) {
     throw new Error("--days exceeds the supported date range.");
   }
@@ -86,6 +93,8 @@ export function parseOptions(args: string[]) {
   return {
     db: values.db,
     days,
+    start,
+    end,
     help: values.help,
     latestConfig: values["latest-config"],
     details: values.details,
@@ -407,8 +416,7 @@ if (import.meta.main) {
     if (options.help) {
       console.log(HELP);
     } else {
-      const end = Date.now();
-      const start = end - options.days * DAY_MS;
+      const { start, end } = options;
       const db = new Database(options.db, { readonly: true, strict: true });
       try {
         console.log(

@@ -437,14 +437,15 @@ so Bun does not need to be on sudo's PATH. It may prompt for your password. All
 arguments are forwarded; use `--db PATH` to override the default database.
 
 Use `--latest-config` to report only the newest configuration period for each
-keyboard, intersected with the `--days` window. Empty latest periods show zero
+keyboard, intersected with the report window. Empty latest periods show zero
 presses instead of falling back to older results. The report displays the period
 ID, load time, and settings. Without this flag, the report combines periods in the
 window, lists their settings, and counts presses with unknown configurations.
 Legacy databases remain readable; latest-period mode requires recorded periods.
 
-The default window is the past **7 × 24 hours**, ending when the report starts.
-`--days` accepts a positive whole number. Each keyboard gets its own report:
+The default window is **today, from local midnight until the report starts**.
+Use `--days N` for the past **N × 24 hours** instead; `N` must be a positive whole
+number. Each keyboard gets its own report:
 
 - Overall presses, suppressed presses, and suppression rate.
 - Daily totals in local time, including dates with no recorded presses. The first

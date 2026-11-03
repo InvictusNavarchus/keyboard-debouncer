@@ -167,7 +167,7 @@ test("timing reconstruction stays within the window and keyboard, using recordin
 });
 
 test("CLI validates arguments and help works without opening a database", () => {
-  expect(parseOptions([]).days).toBe(7);
+  expect(parseOptions([]).days).toBeUndefined();
   expect(parseOptions(["--days", "14"]).days).toBe(14);
   for (const value of [
     "0",
@@ -184,6 +184,36 @@ test("CLI validates arguments and help works without opening a database", () => 
   const result = runCli(["--help"]);
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toContain("Usage:");
+  expect(result.stdout.toString()).toContain("local midnight today");
+});
+
+test("default window starts at local midnight while --days stays a rolling window", () => {
+  const originalTimezone = process.env.TZ;
+  try {
+    for (const timezone of ["UTC", "Asia/Jakarta", "America/New_York"]) {
+      process.env.TZ = timezone;
+      // Include daylight-saving transitions as well as an ordinary date.
+      for (const [month, day] of [
+        [10, 3],
+        [2, 8],
+        [10, 1],
+      ] as const) {
+        const now = new Date(2026, month, day, 15, 30).getTime();
+        const today = parseOptions([], now);
+        expect(today.start).toBe(new Date(2026, month, day).getTime());
+        expect(today.end).toBe(now);
+        expect(parseOptions(["--latest-config"], now).start).toBe(today.start);
+        for (const days of [1, 14]) {
+          const rolling = parseOptions(["--days", String(days)], now);
+          expect(rolling.start).toBe(now - days * 86_400_000);
+          expect(rolling.end).toBe(now);
+        }
+      }
+    }
+  } finally {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
 });
 
 test("migrated databases mix labeled historical and measured timings without inventing restart gaps", () => {
@@ -259,7 +289,7 @@ test("CLI reads a live WAL database, honors timezone, and never creates missing 
     timestamp,
   );
   for (const timezone of ["UTC", "Asia/Jakarta"]) {
-    const result = runCli(["--db", path], timezone);
+    const result = runCli(["--db", path, "--days", "1"], timezone);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain(`(${timezone})`);
     const hour = new Intl.DateTimeFormat("en-GB", {
