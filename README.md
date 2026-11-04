@@ -1,517 +1,169 @@
 # keyboard-debouncer
 
-A CLI daemon for Linux that prevents keyboard chatter by intercepting events at the
-OS level via `evdev` and `uinput`. It grabs your physical keyboard exclusively, filters
-out high‑speed bounce, and re‑injects clean key events through a virtual device.
+Stops unwanted repeated characters caused by keyboard chatter. This Linux daemon
+reads your physical keyboard, filters repeated presses on the keys you choose,
+and forwards clean events through a virtual keyboard using `evdev` and `uinput`.
 
-## Features
-
-- **Normal debounce** – suppresses a re-press that arrives within `THRESHOLD_MS` after
-  the last physical release.
-- **Tiered extended debounce** – classifies every forwarded keypress by its hold duration
-  into one of three tiers, each arming a progressively stricter debounce window for the
-  next cycle:
-  - *Micro* (`< MICRO_HOLD_THRESHOLD_MS`, default 20 ms) — hardware ghost contact; unambiguously chatter. Arms a 150 ms lockout.
-  - *Short* (`< SHORT_HOLD_THRESHOLD_MS`, default 70 ms) — potentially suspicious hold. **Requires per-user calibration**: fast typists can produce holds in this range legitimately, causing false positives on rapid same-key repetition. Arms a 100 ms lockout.
-  - *Normal* (≥ `SHORT_HOLD_THRESHOLD_MS`) — uses the base threshold.
-- **Debounce all keys** (optional) – when enabled, all keys are debounced automatically
-  instead of only a curated list. Modifier keys and controls (Shift, Ctrl, Alt, Meta,
-  CapsLock, etc.) are intelligently excluded since they don't chatter and have different
-  timing semantics.
-- **Key health tracking** (optional) – passively records *every* key event (even
-  non‑target keys) to an SQLite database. You can later query the data to identify
-  switches that are starting to fail, **before** the chatter becomes noticeable.
-- **Zero‑configuration discovery** – set your keyboard name once and the app auto finds the correct `/dev/input/eventX`
+Set your keyboard name once; the daemon finds its input device again after
+reconnects. Optional health tracking records key events locally for later analysis.
 
 ## Prerequisites
 
-**Platform: Linux only.** The daemon grabs `/dev/input/event*` through `evdev`, re-injects
-events via `/dev/uinput`, and ships a udev rule plus a systemd unit — none of which exist
-on macOS or Windows. The `evdev` crate is Linux-only, so the build fails on those
-platforms whatever toolchain is installed. WSL2 compiles it, but has no physical keyboard
-to grab.
+- Linux with systemd for the recommended setup below.
+- Rust and Cargo to build the binary.
+- A C compiler and development headers to build the bundled SQLite library.
+- `evtest` to identify your keyboard and affected keys.
 
-You also need a C compiler and development headers, required by `libsqlite3-sys` to build
-the bundled SQLite. Install the standard toolchain for your distribution:
+See [build prerequisites](docs/installation.md#build-prerequisites) for distribution
+packages. Basic filtering needs neither Bun nor a tracker database.
 
-- **Ubuntu / Debian / Pop!_OS:**
-  ```bash
-  sudo apt update && sudo apt install build-essential
-  ```
+## Recommended setup
 
-- **Fedora / RHEL (Fedora 41+ / DNF5):**
-  ```bash
-  sudo dnf group install development-tools
-  ```
+Install the systemd service so filtering starts at boot and runs without an open
+terminal. The installer configures device permissions; the service runs as the
+unprivileged `kbd-debouncer` user.
 
-- **Arch Linux / Manjaro:**
-  ```bash
-  sudo pacman -S base-devel
-  ```
-
-## How to use
-
-1. **Find your keyboard** using `evtest`, or `libinput list-devices`, or `grep -r '' /sys/class/input/event*/device/name`
-   Note the device name and the `KEY_*` names of the chattering keys.
-2. **Build the binary**: `cargo build --release`
-3. **Copy the example config**:
-   ```
-   cp debouncer.conf.example debouncer.conf
-   ```
-4. **Edit `debouncer.conf`** – provide at minimum `KEYBOARD_NAME` (or
-   `DEVICE_PATH`) and the list of `KEYS`. All other fields have sensible
-   defaults. See the table below.
-5. **Launch** (root or input‑group member required):
-   ```bash
-   sudo ./target/release/keyboard-debouncer
-   # or specify an explicit config path:
-   sudo ./target/release/keyboard-debouncer --config /path/to/debouncer.conf
-   ```
-   If no path is specified, the daemon looks for `debouncer.conf` in the current
-   directory, then `/etc/debouncer.conf`. Supports `-c` or `--config <PATH>` flags.
-   Use `-h`/`--help` for usage and `-V`/`--version` to print the build version.
-
-   > **Tip**: Add your user to the `input` group so you can run the daemon
-   > without `sudo` after a one‑time setup:
-   > ```
-   > sudo usermod -aG input $USER   # log out and back in
-   > ```
-   > Alternatively, create a udev rule that gives the `input` group read/write
-   > access to `/dev/input/event*`.
-
-## Running as a systemd service
-
-Running the debouncer as a systemd service means it starts automatically at boot,
-restarts on failure, and its output goes to the journal — no terminal session needed.
-
-A ready-to-use service unit is included at [`keyboard-debouncer.service`](keyboard-debouncer.service).
-
-> [!NOTE]
-> **Privilege & Security Model (Why `sudo` is needed for installation):**  
-> Intercepting physical keystrokes (`/dev/input/event*`) and injecting virtual keys (`/dev/uinput`)
-> are sensitive kernel interfaces restricted to root by default to prevent unauthorized keylogging or synthetic typing.
->
-> Rather than running the daemon as root 24/7, this architecture implements **runtime privilege separation**:
-> the daemon runs strictly **unprivileged** as `kbd-debouncer` with no root access and strict filesystem sandboxing (`ProtectSystem=strict`, `ProtectHome=true`, `NoNewPrivileges=true`).
-> `sudo` is required **only once during installation** to provision this dedicated user, configure hardware udev permissions, set up boot-time kernel module loading, and register the systemd unit.
-
-### Quick installation (Automated)
-
-You can install everything in one command using the provided install script:
+### 1. Identify your keyboard and affected keys
 
 ```bash
+sudo evtest
+```
+
+Select your physical keyboard and press the keys that chatter. Note its device
+name and the affected `KEY_*` names, such as `KEY_K`. Exit with Ctrl-C.
+
+### 2. Build and install
+
+```bash
+git clone https://github.com/InvictusNavarchus/keyboard-debouncer.git
+cd keyboard-debouncer
 cargo build --release
 sudo ./install.sh
 ```
 
-By default it installs `target/release/keyboard-debouncer`. To install a binary
-from somewhere else — a prebuilt one, or an alternate build — pass `--binary`:
+If you already have a checkout, run the last two commands from its root.
+The installer creates `/etc/debouncer.conf` and installs the service. Existing
+configuration is preserved.
+
+### 3. Set your keyboard and keys
 
 ```bash
-sudo ./install.sh --binary /path/to/keyboard-debouncer
+sudo nano /etc/debouncer.conf
 ```
 
-The script automatically:
-- Installs the release binary to `/usr/local/bin/keyboard-debouncer`
-- Ensures the `uinput` kernel module loads at boot (`/etc/modules-load.d/uinput.conf`)
-- Creates the unprivileged system user `kbd-debouncer` in the `input` group
-- Configures udev permissions for `/dev/uinput`
-- Copies the template configuration to `/etc/debouncer.conf` (without overwriting existing configs)
-- Installs and reloads the systemd service
+Set `KEYBOARD_NAME` to the exact name from `evtest` and `KEYS` to the keys that
+chatter. These two fields are enough for basic filtering:
 
-After installation:
-1. Edit `/etc/debouncer.conf` to set your `KEYBOARD_NAME` and target `KEYS`.
-2. Enable and start the service:
-   ```bash
-   sudo systemctl enable --now keyboard-debouncer
-   ```
-3. Check daemon status:
-   ```bash
-   sudo systemctl status keyboard-debouncer
-   ```
-
----
-
-### Manual installation (Step-by-step)
-
-If you prefer setting up the components manually:
-
-#### 1 — Build and install the binary
-
-```bash
-cargo build --release
-sudo install -m 755 target/release/keyboard-debouncer /usr/local/bin/
+```ini
+KEYBOARD_NAME=your-keyboard-name-in-evtest
+KEYS=KEY_K,KEY_L
 ```
 
-#### 2 — Install the config
+Start with the default thresholds and leave tracking disabled. You can tune the
+filter after checking how it behaves with your keyboard and typing speed.
+
+### 4. Start and verify
 
 ```bash
-sudo cp debouncer.conf.example /etc/debouncer.conf
-sudo nano /etc/debouncer.conf   # set KEYBOARD_NAME and KEYS at minimum
-```
-
-#### 3 — Ensure `uinput` kernel module loads on boot
-
-```bash
-echo "uinput" | sudo tee /etc/modules-load.d/uinput.conf
-sudo modprobe uinput
-```
-
-#### 4 — Create a dedicated system user
-
-The service runs as an unprivileged `kbd-debouncer` user instead of root.
-This user only needs access to `/dev/input/event*` (via the `input` group) and
-`/dev/uinput` (via the udev rule below).
-
-```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
-    --groups input --comment "keyboard-debouncer daemon" kbd-debouncer
-```
-
-#### 5 — Grant access to `/dev/uinput`
-
-The `input` group covers reading real devices, but `/dev/uinput` (used to create
-the virtual keyboard) is typically owned by `root`. Add a udev rule to fix this:
-
-```bash
-echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' \
-    | sudo tee /etc/udev/rules.d/99-keyboard-debouncer.rules
-sudo udevadm control --reload-rules && sudo udevadm trigger
-```
-
-> **Note**: If `/dev/uinput` is not in the `input` group even after the udev rule
-> (some distributions handle this differently), you can add `kbd-debouncer` to the
-> group that owns it, or fall back to running the service as `root` by removing the
-> `User=` and `Group=` lines from the unit file.
-
-#### 6 — Install and enable the service
-
-```bash
-sudo install -m 644 keyboard-debouncer.service /etc/systemd/system/
-sudo systemctl daemon-reload
 sudo systemctl enable --now keyboard-debouncer
-```
-
-> [!IMPORTANT]
-> These steps assume a **fresh** install. If you are repeating them to upgrade an
-> existing one, `enable --now` will not restart a unit that is already running, so
-> the daemon carries on executing the old binary. Finish with an explicit restart:
-> ```bash
-> sudo systemctl restart keyboard-debouncer
-> ```
-> See [Upgrading](#upgrading) for the details.
-
-#### 7 — Verify it's running
-
-```bash
 sudo systemctl status keyboard-debouncer
+sudo journalctl -u keyboard-debouncer -b -n 30 --no-pager
 ```
+
+Look for `Device grabbed.` and `Running…` in the logs. An active service may
+still be waiting for a keyboard; if it reports `Device not found`, check that
+`KEYBOARD_NAME` matches and the keyboard is connected.
+
+Try normal typing and intentional double letters on the affected keys. If a
+wanted second press disappears, follow the [threshold tuning guidance](docs/configuration.md#tuning-thresholds).
+The defaults can suppress legitimate rapid same-key presses, especially for fast
+typists, so this check is part of setup.
+
+For manual installation or a temporary foreground run, see
+[installation details](docs/installation.md).
+
+## Everyday operations
+
+Edit `/etc/debouncer.conf` to change the keyboard, keys, or thresholds, then
+restart the service to apply the changes.
+
+| Task                          | Command                                     |
+| ----------------------------- | ------------------------------------------- |
+| Restart after a config change | `sudo systemctl restart keyboard-debouncer` |
+| Check status                  | `sudo systemctl status keyboard-debouncer`  |
+| Follow logs                   | `sudo journalctl -u keyboard-debouncer -f`  |
+| Show logs since boot          | `sudo journalctl -u keyboard-debouncer -b`  |
+| Stop filtering                | `sudo systemctl stop keyboard-debouncer`    |
+| Disable autostart             | `sudo systemctl disable keyboard-debouncer` |
+| Check installed version       | `keyboard-debouncer --version`              |
 
 ### Upgrading
 
+If tracking was enabled on an older version, ensure `KEYBOARD_ID` is set before
+upgrading; see [tracking and migration details](docs/health-tracking.md#upgrading-existing-databases).
+
+From the repository root:
+
 ```bash
-git pull
+git pull --ff-only
 cargo build --release
 sudo ./install.sh
 ```
 
-Re-running the installer is safe: `/etc/debouncer.conf` is never overwritten, and
-the `kbd-debouncer` user is only created if absent. The udev rule and the
-module-load entry are rewritten to their known-good contents on every run.
-
-If the service is already running, the installer restarts it. This matters more
-than it looks — replacing the binary on disk does **not** affect a process that
-is already running, and `systemctl daemon-reload` only re-reads unit files, not
-the executable they point at. Without the restart an upgrade appears to succeed
-while the old code keeps handling your keystrokes.
-
-Confirm the new build is actually live:
-
-```bash
-keyboard-debouncer --version
-sudo systemctl status keyboard-debouncer
-```
-
-The daemon also logs its version on startup, so `journalctl -u keyboard-debouncer -b`
-tells you which build produced any given run after the fact.
+Your `/etc/debouncer.conf` is preserved. The installer restarts an active service
+to load the new binary. Check the startup version in the logs to verify the upgrade.
 
 ### Uninstalling
+
+From the repository root:
 
 ```bash
 sudo ./uninstall.sh
 ```
 
-Stops and disables the service, then removes the binary, the systemd unit, the
-udev rule, and the `kbd-debouncer` user.
+This stops and disables the service and removes its installed components.
+Your configuration and tracker database are kept. To delete those too, run
+`sudo ./uninstall.sh --purge`, which asks for confirmation before deletion.
+See [uninstall details](docs/installation.md#uninstall-details) for shared resources
+that are deliberately retained.
 
-**Your data is kept by default.** `/etc/debouncer.conf` and the tracker database
-in `/var/lib/keyboard-debouncer/` survive, because everything else can be
-recreated by re-running the installer while a hand-tuned config and an
-accumulated chatter history cannot. To delete those too:
+## Optional health tracking
 
-```bash
-sudo ./uninstall.sh --purge
-```
+To record key events for analysis, add these settings to `/etc/debouncer.conf`,
+using a unique label for your physical keyboard:
 
-`--purge` lists exactly what it will destroy and asks for confirmation first.
-
-Three things it deliberately leaves alone:
-
-- **`/etc/modules-load.d/uinput.conf` is never removed**, only reported. `uinput`
-  is shared infrastructure and other tools may rely on it loading at boot, and
-  because `uinput` is the only sensible content for that file there is no way to
-  tell ours from one you or another package wrote. Deleting it wrongly would
-  break unrelated software one reboot later with nothing pointing back here, so
-  it stays. Remove it by hand if nothing else on the system needs `/dev/uinput`.
-- **A `kbd-debouncer` account this installer did not create.** Ownership is
-  checked against the comment field `install.sh` sets, not the name alone.
-- **The `input` group**, which comes from your distribution rather than from this
-  project.
-
-If a copy of the daemon is still running outside systemd — started by hand
-rather than through the service — the uninstaller warns and tells you how to
-stop it, but continues.
-
-### Viewing logs
-
-```bash
-# Stream live output
-journalctl -u keyboard-debouncer -f
-
-# Show all logs since last boot
-journalctl -u keyboard-debouncer -b
-```
-
-### Common operations
-
-| Task | Command |
-|------|---------|
-| Restart after a config change | `sudo systemctl restart keyboard-debouncer` |
-| Stop the daemon | `sudo systemctl stop keyboard-debouncer` |
-| Disable autostart | `sudo systemctl disable keyboard-debouncer` |
-| Check status | `sudo systemctl status keyboard-debouncer` |
-| Check installed version | `keyboard-debouncer --version` |
-
-### Health tracker database path
-
-If you enable `TRACK_DB` in your config, use the path the service pre-creates for you:
-
-```
+```ini
 TRACK_DB=/var/lib/keyboard-debouncer/keys.db
 KEYBOARD_ID=keychron-k8-desk-01
 ```
 
-The `StateDirectory=keyboard-debouncer` directive in the unit file ensures
-`/var/lib/keyboard-debouncer/` is created and owned by `kbd-debouncer` with `0700`
-permissions (`UMask=0077`).
-
-> [!TIP]
-> **Database Privacy & Inspection:**  
-> Because the keystroke history is sensitive, `/var/lib/keyboard-debouncer/` is restricted
-> to mode `0700` (`drwx------`). Non-root desktop applications and users cannot read the database.
-> To query your keystroke data, run `sqlite3` as root:
-> ```bash
-> sudo sqlite3 /var/lib/keyboard-debouncer/keys.db "SELECT * FROM key_events ORDER BY timestamp_ms DESC LIMIT 10;"
-> ```
-
----
-
-## Configuration (`debouncer.conf`)
-
-| Field                          | Required?      | Description |
-|--------------------------------|----------------|-------------|
-| `KEYBOARD_NAME`                | 1 of these 2   | Keyboard name as shown by `evtest` — used to auto-discover the event node. |
-| `DEVICE_PATH`                  | 1 of these 2   | Direct path, e.g. `/dev/input/event10`. Overrides `KEYBOARD_NAME` if both are set. |
-| `KEYS`                         | **Yes**        | Comma-separated keys to debounce, using `KEY_*` names from `evtest` (example: `KEY_K,KEY_L,KEY_ENTER`). Ignored if `DEBOUNCE_ALL_KEYS` is set. |
-| `DEBOUNCE_ALL_KEYS`            | No             | `true` / `false` — debounce all keyboard keys automatically. Modifiers always excluded. Default: `false`. |
-| `THRESHOLD_MS`                 | No             | Base debounce window in ms. Any re-press within this window of the last release is suppressed. Default: `30`. |
-| `SHORT_HOLD_THRESHOLD_MS`      | No             | Hold below this (but above `MICRO_HOLD_THRESHOLD_MS`) arms the extended window. Default: `70`. **Most calibration-sensitive parameter** — fast typists may produce holds in this range legitimately; lower toward `MICRO_HOLD_THRESHOLD_MS` if you see false positives on fast same-key presses. |
-| `EXTENDED_THRESHOLD_MS`        | No             | Debounce window after a *Short* hold, in ms. Default: `100`. |
-| `MICRO_HOLD_THRESHOLD_MS`      | No             | Hold below this is classified as *Micro* (hardware ghost contact), arming the micro-extended window. Default: `20`. |
-| `MICRO_EXTENDED_THRESHOLD_MS`  | No             | Debounce window after a *Micro* hold, in ms. Default: `150`. |
-| `LOG_FORWARD`                  | No             | `true` / `false` — log every forwarded event immediately. Default: `false`. |
-| `KEYBOARD_ID`                 | When tracking  | User-assigned unique label for this physical keyboard. Required when `TRACK_DB` is set. |
-| `TRACK_DB`                     | No             | Path to an SQLite file for passive key-health recording. Created automatically. Disabled by default. |
-
-See [`docs/debounce-algorithm.md`](docs/debounce-algorithm.md) for a detailed explanation
-of how the tiered debounce mechanism works, including worked examples, the rationale
-behind each default value, and a threshold tuning guide.
-
-## How the health tracker works
-
-When `TRACK_DB` is set, every key press, release, and auto‑repeat is written to
-a local SQLite database with millisecond‑accurate timestamps, the key name
-(e.g., `KEY_A`), the event value (`1` = down, `0` = up, `2` = auto‑repeat),
-and a `suppressed` flag (`0` = forwarded, `1` = dropped by the debouncer).
-
-For each key event, the daemon captures the monotonic clock and wall clock once,
-before filtering and logging. Gap/hold calculations, threshold decisions, and state
-updates share that monotonic capture; logs and `ts_ms` share the wall-clock capture.
-The tracker stores the calculated durations as nullable `gap_ms` and `hold_ms`
-SQLite `REAL` values, preserving sub-millisecond precision. A press stores the gap
-since the same key's last physical release; a release stores the hold since its
-last press. This includes suppressed cycles and keys outside the debounce targets.
-Auto-repeats have neither duration. The first press/release without a known prior
-release/press has a null duration. These are daemon processing timings, not kernel
-event timestamps.
-
-Startup automatically adds these columns plus `timing_version` to existing
-databases. Historical rows retain null timing fields and a null version; new rows
-use version `1`, including rows whose duration is unavailable. This distinguishes
-old data from intentionally missing measurements after a restart. No historical
-durations are backfilled. Upgrade and restart the daemon to begin recording them.
-
-When tracking is enabled, set `KEYBOARD_ID` to a unique label for the physical
-keyboard, such as `keychron-k8-desk-01`. This label identifies recording history;
-`KEYBOARD_NAME` / `DEVICE_PATH` still selects the input device. Keep the label
-across restarts, reconnects, and USB port changes. Use a new label for a replacement
-keyboard, even the same model, and restore the previous label when switching back.
-The daemon trusts this label; it does not automatically detect a hardware swap.
-Restart the service after changing the config.
-
-The `keyboards` table stores each text identity once, with an integer primary key.
-Each event stores only its integer `keyboard_id` reference. Identity resolution
-happens once at startup, outside the event recording path; reconnects reuse it.
-No additional event index is created.
-
-Existing databases migrate automatically on startup. Historical events keep a
-`NULL` keyboard reference because their source cannot be inferred. **Before
-upgrading a tracking-enabled installation, add `KEYBOARD_ID` to its config**;
-missing or blank identities prevent startup. Database initialization errors also
-prevent startup rather than silently continuing without the requested recording.
-
-For example, inspect recent events with their identities (including old records):
-
-```sql
-SELECT e.ts_ms, k.identity, e.key, e.value, e.suppressed
-FROM key_events AS e
-LEFT JOIN keyboards AS k ON k.id = e.keyboard_id
-ORDER BY e.ts_ms DESC
-LIMIT 20;
-```
-
-### Configuration history
-
-When tracking is enabled, startup records the effective debounce settings in
-`config_periods`. Each period contains its keyboard reference, load timestamp,
-five thresholds, debounce-all mode, and a sorted JSON array of target keys.
-Settings resolve once at startup; each event stores only `config_period_id`.
-No event index is added for that reference.
-
-The daemon compares settings with the latest period for that keyboard. Identical
-settings reuse it, including across restarts; changing any filtering setting starts
-a new period. Returning to an older setting creates another period, so `20 → 30 →
-20` remains three distinct tuning attempts. Key ordering, duplicate keys, and log
-preferences do not start periods. Target keys are recorded as `[]` when debounce-all
-mode makes that list irrelevant. Period IDs are generated automatically by SQLite.
-
-Edit the configuration and restart to apply changes. `started_at_ms` is when the
-settings were loaded, not when the file was edited. Migration leaves historical
-event references null; their settings cannot be inferred. Periods are immutable.
-This assumes one daemon writer per physical keyboard, as in the service setup.
-
-### Compact health report (Bun)
-
-With [Bun](https://bun.sh) installed, run the read-only analytics helper. No package
-installation is needed to run it:
+Restart the service to begin recording:
 
 ```bash
-bun scripts/analyze.ts --db /path/to/keys.db
-bun scripts/analyze.ts --db /path/to/keys.db --days 14
-bun scripts/analyze.ts --help
+sudo systemctl restart keyboard-debouncer
 ```
 
-The database path defaults to `/var/lib/keyboard-debouncer/keys.db`. For the
-service's private database, use the shortcut from the repository root:
+Use the keyboard normally to collect data. With Bun installed, run the report
+from the repository root:
 
 ```bash
 bun run analyze
-bun run analyze --days 14
-bun run analyze --latest-config
-bun run analyze --details
-bun run analyze --latest-config --details
 ```
 
-The shortcut runs the report through `sudo`, using your Bun executable's full path
-so Bun does not need to be on sudo's PATH. It may prompt for your password. All
-arguments are forwarded; use `--db PATH` to override the default database.
+The report covers today in local time and shows suppressed presses and the most
+affected keys. It uses `sudo` to read the private database. Tracking records all
+keys, including those outside your configured targets; a suppressed event is a
+filter decision, not proof of a defective switch.
 
-Use `--latest-config` to report only the newest configuration period for each
-keyboard, intersected with the report window. Empty latest periods show zero
-presses instead of falling back to older results. The report displays the period
-ID, load time, and settings. Without this flag, the report combines periods in the
-window, lists their settings, and counts presses with unknown configurations.
-Legacy databases remain readable; latest-period mode requires recorded periods.
+See [health tracking and reports](docs/health-tracking.md) for longer reporting
+windows, tuning comparisons, database privacy, and recording details.
 
-The default window is **today, from local midnight until the report starts**.
-Use `--days N` for the past **N × 24 hours** instead; `N` must be a positive whole
-number. Each keyboard gets its own report:
+## Further documentation
 
-- Overall presses, suppressed presses, and suppression rate.
-- Daily totals in local time, including dates with no recorded presses. The first
-  and last dates may cover only part of a day.
-- All 24 local hours, combining the same hour across dates to reveal patterns.
-- Top 10 affected keys ranked by suppressed count, with total presses and per-key
-  rates so low-volume keys have context.
-- Gap and hold sample counts, minimum, p5, median, p95, and maximum in milliseconds,
-  separately for forwarded and suppressed presses, overall. Add `--details` to
-  include timing tables for each top affected key; the compact top-keys ranking
-  is always displayed when suppressions exist.
-  `Mono` counts stored monotonic samples; `Approx` counts reconstructed historical
-  samples. `Samples` is their sum; distributions and histograms combine both.
-- Overall gap histogram with buckets `<20`, `20–<30`, `30–<70`, `70–<100`,
-  `100–<150`, and `≥150` ms. Counts separate forwarded and suppressed presses.
-
-**Gap** means the same key's physical release → next press, including suppressed
-releases; it is not the interval between two presses. Gap samples are classified
-by the next press's decision. **Hold** means a press → its matching release,
-classified by that press's decision. Auto-repeats do not affect either measurement.
-Percentiles use linear interpolation; empty samples display `—`. Zero-ms durations
-are retained because events can share a stored millisecond. Long idle gaps remain
-included, so use the histogram alongside percentiles when tuning debounce windows.
-
-New recordings use the daemon's stored monotonic durations directly, including
-when a predecessor falls outside the reporting window or its recording was lost.
-The event ending the gap or hold must be inside the window, selected by `ts_ms`.
-A null duration on a version `1` row is skipped; it is never reconstructed across
-a restart. Wall-clock adjustments affect calendar placement, not these durations.
-
-Historical timings are reconstructed from integer wall-clock timestamps, in
-recording order, using only events inside the selected window. Pairs are kept
-separate by keyboard and key. Missing preceding releases, incomplete holds,
-inconsistent press/release decisions, and negative durations are skipped and
-counted. Historical first presses usually have no gap sample. Events outside the
-window are not used to complete historical pairs. Restarts, lost recordings, and
-wall-clock changes that leave plausible positive durations cannot be identified
-reliably in historical data.
-
-Use the gap distributions to assess debounce windows, and hold distributions to
-assess micro/short hold cutoffs. Forwarded does not guarantee intentional typing,
-and suppressed does not guarantee hardware chatter. For historical events without a
-configuration reference, threshold changes are unknown. These statistics describe observed events rather than provide an automatic
-ideal threshold.
-
-**Suppression rate = suppressed key-downs / all recorded key-downs.** Releases and
-auto-repeats are excluded. This measures the daemon's decisions, including possible
-false positives, rather than confirmed hardware faults. Keys outside the configured
-debounce targets also contribute to the denominator. Comparisons across configuration
-changes therefore need care. A missing recording cannot distinguish idle time from
-a stopped tracker. A zero denominator displays `—`.
-
-Historical records without a keyboard identity are reported separately. Databases
-from before identity tracking are supported without migration. Queries use a
-consistent read-only snapshot and work while the daemon records in WAL mode.
-Time grouping uses the machine's local timezone; set `TZ=UTC` before running Bun
-if you prefer UTC.
-
-To develop or validate the helper (development dependencies only):
-
-```bash
-cd scripts
-bun install --frozen-lockfile
-bun run typecheck
-bun run test
-```
+- [Installation details](docs/installation.md): build packages, manual setup, and foreground execution.
+- [Configuration reference](docs/configuration.md): all settings, device selection, and debounce-all mode.
+- [Debounce algorithm and tuning](docs/debounce-algorithm.md): filtering tiers, default thresholds, and worked examples.
+- [Health tracking and reports](docs/health-tracking.md): analytics options, timing measurements, and database history.
 
 ## Releases
 
