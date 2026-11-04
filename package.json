@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "analyze": "sudo \"$(command -v bun)\" scripts/analyze.ts"
+  }
+}
