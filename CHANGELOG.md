@@ -5,6 +5,10 @@ see [the release guide](docs/releasing.md) for the release procedure.
 
 ## [Unreleased]
 
+### Added
+
+- Linux x86_64 installation archives and SHA-256 checksums built automatically for published releases, with a static daemon binary, service installer, example configuration, and Bun analytics helpers.
+
 ## [0.4.0] - 2026-11-04
 
 ### Added

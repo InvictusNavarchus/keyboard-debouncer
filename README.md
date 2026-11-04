@@ -10,8 +10,8 @@ reconnects. Optional health tracking records key events locally for later analys
 ## Prerequisites
 
 - Linux with systemd for the recommended setup below.
-- Rust and Cargo to build the binary.
-- A C compiler and development headers to build the bundled SQLite library.
+- Rust and Cargo when building from source.
+- A C compiler and development headers when building the bundled SQLite library from source.
 - `evtest` to identify your keyboard and affected keys.
 
 See [build prerequisites](docs/installation.md#build-prerequisites) for distribution
@@ -44,6 +44,10 @@ sudo ./install.sh
 If you already have a checkout, run the last two commands from its root.
 The installer creates `/etc/debouncer.conf` and installs the service. Existing
 configuration is preserved.
+
+For releases with prebuilt Linux x86_64 assets, you can install without a Rust or
+C toolchain. See [prebuilt installation](docs/installation.md#prebuilt-binaries)
+for downloads, checksum verification, and the installer command.
 
 ### 3. Set your keyboard and keys
 

@@ -98,11 +98,53 @@ gh release view v0.4.1 \
   --repo InvictusNavarchus/keyboard-debouncer
 ```
 
-Stable releases follow the existing source-only format; GitHub supplies source
-archives for the tag. For a prerelease, add `--prerelease` to `gh release create`.
+For a prerelease, add `--prerelease` to `gh release create`.
 
-If GitHub publication fails after the tag was pushed, retry only this step using
-the existing tag. If an earlier step fails, inspect `git status`, the current
-version, local tags, and remote refs before retrying: `cargo-release` may already
-have applied some changes. Preserve reviewed notes and do not recreate or move a
-published version tag.
+If GitHub publication fails after the tag was pushed, retry only the publication
+step using the existing tag. If an earlier step fails, inspect `git status`, the
+current version, local tags, and remote refs before retrying: `cargo-release` may
+already have applied some changes. Preserve reviewed notes and do not recreate
+or move a published version tag.
+
+## Automatic binary builds
+
+Publishing a release triggers [Release binaries](../.github/workflows/release.yml).
+The workflow checks out the release tag, checks its Cargo version, installs the
+latest Bun 1.4.x patch, and runs the analytics type check and tests with Bun.
+It tests and builds the daemon for `x86_64-unknown-linux-musl` with stable Rust,
+then verifies the executable's version, help output, and static linkage.
+
+The workflow attaches a Linux x86_64 installation archive and its `.sha256` file
+to the existing release. The archive contains the binary, installer, uninstaller,
+systemd unit, example configuration, documentation, license, and Bun reporting
+helpers, plus the source from that exact tag. GitHub also supplies the automatic
+source archives. Binary assets appear after the workflow finishes; publication
+initially shows only the source archives.
+
+The job uses GitHub's built-in token with `contents: write`; no additional secret
+is required. Project JavaScript/TypeScript commands use Bun, including forcing the
+type checker to run with Bun. Standard checkout/setup actions use GitHub's own
+Node action runtime internally.
+
+The workflow must be on the default branch before a manual run. To build assets
+for an existing published release, such as v0.4.0, without moving its tag:
+
+```bash
+gh workflow run release.yml \
+  --repo InvictusNavarchus/keyboard-debouncer \
+  --ref master \
+  -f tag=v0.4.0
+
+gh run list \
+  --repo InvictusNavarchus/keyboard-debouncer \
+  --workflow release.yml
+```
+
+Manual runs use the workflow from `master` and build the source at the requested
+tag. A draft release must be published first. Immutable releases cannot accept
+assets after publication and are rejected by this workflow.
+
+Existing assets are never overwritten. After a failed build, rerun its workflow.
+If a partial upload left assets behind, inspect them before deliberately removing
+the affected archive/checksum and retrying. CI checks do not exercise a physical
+keyboard; verify device interception on hardware before shipping behavior changes.

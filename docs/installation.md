@@ -5,6 +5,45 @@ For the recommended automated systemd setup, follow the
 alternative device discovery, foreground execution, and manual service installation.
 Run repository commands from the repository root unless a step says otherwise.
 
+## Prebuilt binaries
+
+Published releases with binary assets provide a Linux x86_64 archive named
+`keyboard-debouncer-v<VERSION>-x86_64-unknown-linux-musl.tar.gz` and a matching
+`.tar.gz.sha256` checksum file on the
+[releases page](https://github.com/InvictusNavarchus/keyboard-debouncer/releases).
+Choose the installation archive rather than GitHub's automatic source archives.
+Older releases may only have source archives.
+
+The daemon is statically linked with musl and bundled SQLite, so installing it
+does not require Rust, a C compiler, or a system SQLite library. The service setup
+still requires Linux with systemd, and `evtest` helps identify your keyboard.
+These binaries are for x86_64 machines; other architectures must build from source.
+
+Download both files from the same release into one directory. Substitute the
+selected version in these commands:
+
+```bash
+RELEASE_VERSION=0.4.1
+ARCHIVE="keyboard-debouncer-v$RELEASE_VERSION-x86_64-unknown-linux-musl.tar.gz"
+sha256sum --check "$ARCHIVE.sha256"
+tar -xzf "$ARCHIVE"
+cd "${ARCHIVE%.tar.gz}"
+./keyboard-debouncer --version
+sudo ./install.sh --binary ./keyboard-debouncer
+```
+
+Continue with [configuration and startup](../README.md#3-set-your-keyboard-and-keys).
+The archive includes the installer, uninstaller, systemd unit, example config,
+documentation, license, and analytics helpers. Bun is only needed for the optional
+reports; `bun run analyze` works from the extracted directory.
+The matching source is included; local configuration and development dependencies
+are excluded.
+
+For upgrades, extract the new version into its own directory and run its installer
+with `--binary` again. Existing configuration is preserved and an active service
+is restarted. Keep the extracted directory if you want to use its analytics helpers
+or uninstaller later.
+
 ## Build prerequisites
 
 Install Rust and Cargo before building. The setup instructions also use `evtest`
