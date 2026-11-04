@@ -1,0 +1,31 @@
+allow-branch = ["master"]
+publish = false
+sign-commit = true
+sign-tag = true
+consolidate-commits = false
+push = true
+push-remote = "origin"
+tag-name = "v{{version}}"
+tag-message = "keyboard-debouncer v{{version}}"
+pre-release-commit-message = """
+chore(release): {{version}}
+
+Release the changes documented in CHANGELOG.md as keyboard-debouncer {{version}}.
+"""
+pre-release-hook = ["sh", "scripts/check-release.sh"]
+
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = '(?m)^## \[Unreleased\]$'
+replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}"
+exactly = 1
+prerelease = true
+
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = '(?m)^\[Unreleased\]: .*$'
+replace = """
+[Unreleased]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v{{version}}...HEAD
+[{{version}}]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v{{prev_version}}...v{{version}}"""
+exactly = 1
+prerelease = true

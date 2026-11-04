@@ -513,6 +513,11 @@ bun run typecheck
 bun run test
 ```
 
+## Releases
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and
+[the release guide](docs/releasing.md) for the `cargo-release` workflow.
+
 ## License
 
 This app is licensed under GPLv3
