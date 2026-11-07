@@ -4,7 +4,8 @@
 [cargo-release](https://github.com/crate-ci/cargo-release) for version updates,
 changelog rollover, signed commits and tags, and pushing to `origin`.
 [release.toml](../release.toml) restricts releases to `master` and disables Cargo
-registry publishing. GitHub release publication is a separate final step.
+registry publishing. Pushing a version tag starts GitHub Actions, which builds
+and validates the installation archive before publishing the GitHub release.
 
 ## Record changes during development
 
@@ -30,7 +31,6 @@ Older Git tags have no corresponding published release notes in this changelog.
   ```
 - `cargo-release` (this configuration was validated with 1.1.7).
 - Git commit/tag signing configured with an available signing key.
-- GitHub CLI authenticated with permission to publish this repository's releases.
 - Permission to push `master` and version tags to `origin`.
 
 Run the following release commands from the repository root.
@@ -55,9 +55,10 @@ cargo release 0.4.1
 ```
 
 This defaults to a dry run. Review the planned version, changelog replacements,
-commit, tag, and push. The pre-release hook runs Rust tests, analytics type
-checking and tests, a release build, and the binary's `--version` command. Any
-failed check stops the release before the release commit is created.
+commit, tag, and push. The pre-release hook refuses missing or empty release
+notes, then runs Rust tests, analytics type checking and tests, a release build,
+and the binary's `--version` command. Any failed check stops the release before
+the release commit is created.
 
 Dry runs leave the version and changelog unchanged, so their checks validate the
 current checkout. Execution repeats the checks after applying the version and
@@ -78,73 +79,75 @@ Review the confirmation prompt. The configured process:
 4. Creates a signed `chore(release): <version>` commit and signed `v<version>` tag.
 5. Pushes the commit and tag to `origin`.
 
-It does not publish to crates.io, create a GitHub release, or upload binaries.
+The pushed tag starts the release workflow. Cargo registry publishing is disabled.
 
 ## Publish the GitHub release
 
-Copy only the released version's changelog body into `/tmp/release-notes.md`,
-excluding the version heading, other releases, and the reference links at the
-bottom of the changelog. Append a full changelog link using the previous and new
-tags. Review the file, then publish it:
+Wait for [Release](../.github/workflows/release.yml) to finish. It builds and
+validates the tagged source, extracts that version's changelog body with
+[`scripts/release-notes.sh`](../scripts/release-notes.sh), and assembles the
+archive and checksum on a draft release. It publishes only after both assets
+have uploaded successfully. No manual note copying or publication is needed.
+
+Do not create or publish the release in the GitHub web UI. The workflow owns
+publication and refuses to modify an already published release. Tags with a
+prerelease version, such as `v0.5.0-rc.1`, produce GitHub prereleases.
+
+You can inspect the workflow and resulting release using an authenticated GitHub
+CLI:
 
 ```bash
-gh release create v0.4.1 \
+gh run list \
   --repo InvictusNavarchus/keyboard-debouncer \
-  --verify-tag \
-  --title v0.4.1 \
-  --notes-file /tmp/release-notes.md
+  --workflow release.yml
 
 gh release view v0.4.1 \
   --repo InvictusNavarchus/keyboard-debouncer
 ```
 
-For a prerelease, add `--prerelease` to `gh release create`.
-
-If GitHub publication fails after the tag was pushed, retry only the publication
-step using the existing tag. If an earlier step fails, inspect `git status`, the
-current version, local tags, and remote refs before retrying: `cargo-release` may
-already have applied some changes. Preserve reviewed notes and do not recreate
-or move a published version tag.
+If an upload or publication step fails, rerun the failed workflow jobs. The
+publisher resumes an existing draft and replaces its incomplete assets before
+publishing. A failed build leaves nothing public. If a fix requires a new code
+commit, include the unshipped notes in the next version and release that version;
+do not move a published tag. If a local release step fails, inspect `git status`,
+the current version, local tags, and remote refs before retrying: `cargo-release`
+may already have applied some changes.
 
 ## Automatic binary builds
 
-Publishing a release triggers [Release binaries](../.github/workflows/release.yml).
-The workflow checks out the release tag, checks its Cargo version, installs the
+Pushing a `v*` tag triggers [Release](../.github/workflows/release.yml).
+The workflow checks out that tag, checks its Cargo version, installs the
 latest Bun 1.4.x patch, and runs the analytics type check and tests with Bun.
 It tests and builds the daemon for `x86_64-unknown-linux-musl` with stable Rust,
 then verifies the executable's version, help output, and static linkage.
 
 The workflow attaches a Linux x86_64 installation archive and its `.sha256` file
-to the existing release. The archive contains the binary, installer, uninstaller,
+to the draft release. The archive contains the binary, installer, uninstaller,
 systemd unit, example configuration, documentation, license, and Bun reporting
 helpers, plus the source from that exact tag. GitHub also supplies the automatic
-source archives. Binary assets appear after the workflow finishes; publication
-initially shows only the source archives.
+source archives. All assets are attached before publication, including when
+GitHub immutable releases are enabled.
 
-The job uses GitHub's built-in token with `contents: write`; no additional secret
-is required. Project JavaScript/TypeScript commands use Bun, including forcing the
+Builds use read access; only the publication job receives `contents: write` on
+GitHub's built-in token. No additional secret is required. Project
+JavaScript/TypeScript commands use Bun, including forcing the
 type checker to run with Bun. Standard checkout/setup actions use GitHub's own
 Node action runtime internally.
 
-The workflow must be on the default branch before a manual run. To build assets
-for an existing published release, such as v0.4.0, without moving its tag:
+The workflow must be on the default branch before a manual run. Rehearse the
+build from `master` without creating a tag or publishing a release:
 
 ```bash
 gh workflow run release.yml \
   --repo InvictusNavarchus/keyboard-debouncer \
-  --ref master \
-  -f tag=v0.4.0
+  --ref master
 
 gh run list \
   --repo InvictusNavarchus/keyboard-debouncer \
   --workflow release.yml
 ```
 
-Manual runs use the workflow from `master` and build the source at the requested
-tag. A draft release must be published first. Immutable releases cannot accept
-assets after publication and are rejected by this workflow.
-
-Existing assets are never overwritten. After a failed build, rerun its workflow.
-If a partial upload left assets behind, inspect them before deliberately removing
-the affected archive/checksum and retrying. CI checks do not exercise a physical
-keyboard; verify device interception on hardware before shipping behavior changes.
+Manual runs on a branch upload the archive and checksum as Actions artifacts and
+skip publication. They validate the checked-out Cargo version without requiring a
+version tag. CI checks do not exercise a physical keyboard; verify device
+interception on hardware before shipping behavior changes.

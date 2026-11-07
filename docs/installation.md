@@ -7,7 +7,7 @@ Run repository commands from the repository root unless a step says otherwise.
 
 ## Prebuilt binaries
 
-Published releases with binary assets provide a Linux x86_64 archive named
+New version tags build a Linux x86_64 archive before release publication, named
 `keyboard-debouncer-v<VERSION>-x86_64-unknown-linux-musl.tar.gz` and a matching
 `.tar.gz.sha256` checksum file on the
 [releases page](https://github.com/InvictusNavarchus/keyboard-debouncer/releases).

@@ -1,20 +1,15 @@
-name: Release binaries
+name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing published release tag (for example, v0.4.0)
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-binaries-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -22,37 +17,18 @@ jobs:
     name: Linux x86_64 (musl)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    permissions:
-      contents: write
     defaults:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
       TARGET: x86_64-unknown-linux-musl
       # Compile bundled SQLite with musl; Rust uses its target's bundled runtime.
       CC_x86_64_unknown_linux_musl: musl-gcc
 
     steps:
-      - name: Verify published release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Expected a version tag such as v0.4.0." >&2
-            exit 1
-          fi
-          published_tag=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq '
-            if .draft then error("Release is still a draft")
-            elif .immutable then error("Release is immutable; assets cannot be attached")
-            else .tag_name end')
-          test "$published_tag" = "$RELEASE_TAG"
-
-      - name: Check out release tag
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - name: Set up Bun 1.4.x
@@ -64,10 +40,15 @@ jobs:
         run: |
           [[ "$(bun --version)" == 1.4.* ]]
           version=$(bun -e 'console.log(Bun.TOML.parse(await Bun.file("Cargo.toml").text()).package.version)')
-          if [[ "$RELEASE_TAG" != "v$version" ]]; then
-            echo "Release tag $RELEASE_TAG does not match Cargo version $version." >&2
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match Cargo version $version." >&2
             exit 1
           fi
+          printf 'PACKAGE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Validate release notes
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: scripts/release-notes.sh "$PACKAGE_VERSION" > /dev/null
 
       - name: Set up Rust and musl tools
         run: |
@@ -90,7 +71,7 @@ jobs:
       - name: Verify static binary
         run: |
           binary="target/$TARGET/release/keyboard-debouncer"
-          test "$("$binary" --version)" = "keyboard-debouncer ${RELEASE_TAG#v}"
+          test "$("$binary" --version)" = "keyboard-debouncer $PACKAGE_VERSION"
           "$binary" --help > /dev/null
           readelf -l "$binary" > "$RUNNER_TEMP/program-headers.txt"
           readelf -d "$binary" > "$RUNNER_TEMP/dynamic-section.txt"
@@ -102,7 +83,7 @@ jobs:
       - name: Package installation archive
         id: package
         run: |
-          package="keyboard-debouncer-$RELEASE_TAG-$TARGET"
+          package="keyboard-debouncer-v$PACKAGE_VERSION-$TARGET"
           mkdir -p "dist/$package"
           git archive HEAD | tar -xf - -C "dist/$package"
           install -m 755 "target/$TARGET/release/keyboard-debouncer" "dist/$package/keyboard-debouncer"
@@ -112,10 +93,57 @@ jobs:
           sha256sum "$archive" > "$archive.sha256"
           printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
 
-      - name: Upload release assets
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-debouncer-linux-x86_64
+          path: |
+            dist/${{ steps.package.outputs.archive }}
+            dist/${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: linux-x86_64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          ARCHIVE: ${{ steps.package.outputs.archive }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release upload "$RELEASE_TAG" "dist/$ARCHIVE" "dist/$ARCHIVE.sha256"
+          scripts/release-notes.sh "${TAG#v}" > notes.md
+          version="${TAG#v}"
+          version="${version%%+*}"
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::$TAG is already published; refusing to replace its assets."
+              exit 1
+            fi
+            gh release edit "$TAG" --notes-file notes.md --prerelease="$prerelease"
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+              --notes-file notes.md --prerelease="$prerelease"
+          fi
+
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false
