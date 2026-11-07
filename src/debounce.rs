@@ -1,13 +1,12 @@
 //! Keyboard debounce logic: state management, decision making, and event filtering.
 
 use crate::tracker::EventTiming;
+use crate::watch::{LiveStream, LogLine};
 use evdev::{uinput::VirtualDevice, Device, EventSummary, InputEvent, KeyCode};
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant, SystemTime},
 };
-
-use colored::Colorize;
 
 // ── configuration ────────────────────────────────────────────────────────────
 
@@ -86,7 +85,7 @@ pub struct PerKeyState {
     last_hold_tier: HoldTier,
     /// Buffered forward log messages, emitted only when a subsequent suppress
     /// provides context.
-    pending: Vec<String>,
+    pending: Vec<LogLine>,
 }
 
 impl PerKeyState {
@@ -130,10 +129,11 @@ impl PerKeyState {
         }
     }
 
-    /// Flush all pending forward log messages to stderr.
-    fn flush_pending(&mut self) {
-        for msg in self.pending.drain(..) {
-            eprintln!("{msg}");
+    /// Flush all pending forward log messages to stderr and default watch clients.
+    fn flush_pending(&mut self, live_stream: &mut LiveStream) {
+        for line in self.pending.drain(..) {
+            live_stream.emit_stderr(&line);
+            live_stream.broadcast(&line, Some(false));
         }
     }
 }
@@ -188,6 +188,7 @@ pub fn run_filter_loop(
     keys: &[KeyCode],
     cfg: &crate::config::DebounceConfig,
     tracker: &crate::tracker::Tracker,
+    live_stream: &mut LiveStream,
     debounce_all: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let threshold = Duration::from_millis(cfg.threshold_ms);
@@ -255,6 +256,7 @@ pub fn run_filter_loop(
                 micro_hold_threshold,
                 now,
                 timing,
+                live_stream,
             );
 
             tracker.track(target_key, event.value(), !forward, wall_time, timing);
@@ -378,19 +380,11 @@ fn apply_decision(
     micro_hold_threshold: Duration,
     now: Instant,
     timing: EventTiming,
+    live_stream: &mut LiveStream,
 ) -> bool {
     match decision {
         EventDecision::Forward { reason } => {
-            let msg = format!(
-                "{} {} {}",
-                ts.dimmed(),
-                if event.value() == 1 {
-                    "↓ FORWARD".green()
-                } else {
-                    "↑ FORWARD".green()
-                },
-                reason
-            );
+            let line = LogLine::forward(ts, event.value() == 1, &reason);
 
             // Update state BEFORE buffering the log message. This ensures that
             // when a new forwarded DN clears the pending context, the new DN's
@@ -416,9 +410,11 @@ fn apply_decision(
             }
 
             if log_forward {
-                eprintln!("{msg}");
+                live_stream.emit_stderr(&line);
+                live_stream.broadcast(&line, None);
             } else {
-                state.pending.push(msg);
+                live_stream.broadcast(&line, Some(true));
+                state.pending.push(line);
             }
 
             true
@@ -426,17 +422,10 @@ fn apply_decision(
 
         EventDecision::Suppress { reason } => {
             // Flush pending forward logs to provide context.
-            state.flush_pending();
-            eprintln!(
-                "{} {} {}",
-                ts.dimmed(),
-                if event.value() == 1 {
-                    "↓ SUPPRESS".red().bold()
-                } else {
-                    "↑ SUPPRESS".red().bold()
-                },
-                reason
-            );
+            state.flush_pending(live_stream);
+            let line = LogLine::suppress(ts, event.value() == 1, &reason);
+            live_stream.emit_stderr(&line);
+            live_stream.broadcast(&line, None);
 
             // Update state based on event type
             match event.value() {
@@ -498,6 +487,7 @@ mod tests {
                 reason.clone()
             }
         };
+        let mut live_stream = LiveStream::disabled();
         let forward = apply_decision(
             decision,
             &event,
@@ -508,6 +498,7 @@ mod tests {
             Duration::from_millis(20),
             now,
             timing,
+            &mut live_stream,
         );
         (forward, timing, reason)
     }

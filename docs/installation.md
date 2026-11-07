@@ -141,8 +141,16 @@ version a run used.
 
 ## Running in the foreground
 
-Use this mode for a temporary run or debugging. Stop any service instance first
-so two processes do not compete for the same keyboard:
+To inspect live colored events while the systemd service is already running,
+attach to its live socket instead of starting a second process:
+
+```bash
+sudo keyboard-debouncer --watch
+sudo keyboard-debouncer --watch --log-forward
+```
+
+Use foreground execution only for a standalone run without the service. Stop any
+service instance first so two processes do not compete for the same keyboard:
 
 ```bash
 sudo systemctl stop keyboard-debouncer
@@ -184,8 +192,9 @@ permissions must also be set up.
 
 If no config path is specified, the daemon checks `debouncer.conf` in the current
 directory, then `/etc/debouncer.conf`. Use `-c` or `--config <PATH>` to select a file,
-`-h`/`--help` for usage, and `-V`/`--version` for the build version. A positional
-config path is also accepted.
+`-w`/`--watch` to stream live events from the running service, `--log-forward` to
+log every forwarded target key event immediately, `-h`/`--help` for usage, and
+`-V`/`--version` for the build version. A positional config path is also accepted.
 
 ## Manual installation
 

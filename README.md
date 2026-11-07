@@ -91,15 +91,17 @@ For manual installation or a temporary foreground run, see
 Edit `/etc/debouncer.conf` to change the keyboard, keys, or thresholds, then
 restart the service to apply the changes.
 
-| Task                          | Command                                     |
-| ----------------------------- | ------------------------------------------- |
-| Restart after a config change | `sudo systemctl restart keyboard-debouncer` |
-| Check status                  | `sudo systemctl status keyboard-debouncer`  |
-| Follow logs                   | `sudo journalctl -u keyboard-debouncer -f`  |
-| Show logs since boot          | `sudo journalctl -u keyboard-debouncer -b`  |
-| Stop filtering                | `sudo systemctl stop keyboard-debouncer`    |
-| Disable autostart             | `sudo systemctl disable keyboard-debouncer` |
-| Check installed version       | `keyboard-debouncer --version`              |
+| Task                          | Command                                             |
+| ----------------------------- | --------------------------------------------------- |
+| Restart after a config change | `sudo systemctl restart keyboard-debouncer`         |
+| Check status                  | `sudo systemctl status keyboard-debouncer`          |
+| Watch live events (colored)   | `sudo keyboard-debouncer --watch`                   |
+| Watch all target presses live | `sudo keyboard-debouncer --watch --log-forward`     |
+| Follow journald logs          | `sudo journalctl -u keyboard-debouncer -f`          |
+| Show logs since boot          | `sudo journalctl -u keyboard-debouncer -b`          |
+| Stop filtering                | `sudo systemctl stop keyboard-debouncer`            |
+| Disable autostart             | `sudo systemctl disable keyboard-debouncer`         |
+| Check installed version       | `keyboard-debouncer --version`                      |
 
 ### Upgrading
 

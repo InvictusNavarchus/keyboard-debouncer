@@ -13,11 +13,15 @@ ExecStart=/usr/local/bin/keyboard-debouncer --config /etc/debouncer.conf
 User=kbd-debouncer
 Group=input
 
-# ── Runtime directory for the health-tracker database ─────────────────────────
-# Creates /var/lib/keyboard-debouncer/ owned by kbd-debouncer on first start.
-# Restricted to 0700 with UMask 0077 so keylog DB is only accessible by service and root.
+# ── State & runtime directories ───────────────────────────────────────────────
+# Creates /var/lib/keyboard-debouncer/ (health-tracker DB) and
+# /run/keyboard-debouncer/ (live watch socket) owned by kbd-debouncer.
+# Restricted to 0700 with UMask 0077 so keylog data and live events are only
+# accessible by the service user and root.
 StateDirectory=keyboard-debouncer
 StateDirectoryMode=0700
+RuntimeDirectory=keyboard-debouncer
+RuntimeDirectoryMode=0700
 UMask=0077
 
 # ── Restart policy ────────────────────────────────────────────────────────────

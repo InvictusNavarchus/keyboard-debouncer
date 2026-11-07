@@ -10,6 +10,7 @@
 mod config;
 mod debounce;
 mod tracker;
+mod watch;
 
 use chrono::{Local, Timelike};
 use debounce::run_filter_loop;
@@ -53,6 +54,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         &cfg.debounce,
         &cfg.keys,
     )?;
+    let mut live_stream = watch::LiveStream::bind();
     let mut connected_before = false;
     let mut last_message_was_not_found = false;
 
@@ -76,7 +78,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        match setup_and_filter(&cfg, &tracker) {
+        match setup_and_filter(&cfg, &tracker, &mut live_stream) {
             Ok(()) => {
                 eprintln!("⚠ Device disconnected. Waiting for reconnection…");
                 std::thread::sleep(Duration::from_secs(1));
@@ -96,6 +98,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn setup_and_filter(
     cfg: &config::Config,
     tracker: &tracker::Tracker,
+    live_stream: &mut watch::LiveStream,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut real = Device::open(&cfg.device_path)?;
 
@@ -146,6 +149,7 @@ fn setup_and_filter(
         &cfg.keys,
         &cfg.debounce,
         tracker,
+        live_stream,
         cfg.debounce.debounce_all,
     ) {
         Err(e) if is_device_disconnected(&e) => Ok(()),
