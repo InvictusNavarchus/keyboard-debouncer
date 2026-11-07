@@ -145,7 +145,10 @@ To inspect live colored events while the systemd service is already running,
 attach to its live socket instead of starting a second process:
 
 ```bash
+# Watch suppressions and buffered context:
 sudo keyboard-debouncer --watch
+
+# Or watch every target key press and release:
 sudo keyboard-debouncer --watch --log-forward
 ```
 

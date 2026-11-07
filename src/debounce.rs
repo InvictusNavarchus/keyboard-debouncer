@@ -590,4 +590,73 @@ mod tests {
             Some(Duration::from_millis(100))
         );
     }
+
+    #[test]
+    fn apply_decision_flushes_pending_context_only_to_default_watchers() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+        use std::time::UNIX_EPOCH;
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let sock_path = std::env::temp_dir().join(format!(
+            "kbd-debouncer-debounce-watch-{}-{nanos}.sock",
+            std::process::id()
+        ));
+        let mut live_stream = LiveStream::bind_at(&sock_path).unwrap();
+
+        let mut c_default = UnixStream::connect(&sock_path).unwrap();
+        c_default.set_nonblocking(true).unwrap();
+        c_default.write_all(&[0]).unwrap();
+
+        let mut c_forward = UnixStream::connect(&sock_path).unwrap();
+        c_forward.set_nonblocking(true).unwrap();
+        c_forward.write_all(&[0x01]).unwrap(); // FLAG_LOG_FORWARD, plain text
+
+        let base = Instant::now();
+        let mut state = PerKeyState::new();
+
+        for (value, offset_ms) in [(1, 0), (0, 80), (1, 90)] {
+            let now = base + Duration::from_millis(offset_ms);
+            let event = InputEvent::new(evdev::EventType::KEY.0, KeyCode::KEY_K.code(), value);
+            let timing = state.timing(value, now);
+            let decision = process_event(
+                &event,
+                KeyCode::KEY_K,
+                Duration::from_millis(30),
+                Duration::from_millis(100),
+                Duration::from_millis(150),
+                Duration::from_millis(70),
+                Duration::from_millis(20),
+                &state,
+                timing,
+            );
+            apply_decision(
+                decision,
+                &event,
+                &mut state,
+                "12:00:00.000",
+                false,
+                Duration::from_millis(70),
+                Duration::from_millis(20),
+                now,
+                timing,
+                &mut live_stream,
+            );
+        }
+
+        let mut buf_def = String::new();
+        let _ = c_default.read_to_string(&mut buf_def);
+        let mut buf_fwd = String::new();
+        let _ = c_forward.read_to_string(&mut buf_fwd);
+
+        // Both watchers see the exact same 3 lines (↓ FORWARD, ↑ FORWARD, ↓ SUPPRESS)
+        // with zero duplicate FORWARD lines on the --log-forward watcher.
+        assert_eq!(buf_def.lines().count(), 3, "{buf_def}");
+        assert_eq!(buf_def, buf_fwd);
+
+        let _ = std::fs::remove_file(&sock_path);
+    }
 }

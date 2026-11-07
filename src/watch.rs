@@ -6,7 +6,7 @@
 //! debounce decisions with sub-millisecond IPC latency, without stopping the
 //! service or polluting `journald` with ANSI escape sequences.
 
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,22 @@ pub const DEFAULT_SOCKET_PATH: &str = "/run/keyboard-debouncer/live.sock";
 const FLAG_LOG_FORWARD: u8 = 0x01;
 const FLAG_COLOR: u8 = 0x02;
 const MAX_CLIENTS: usize = 16;
+
+fn stream_supports_color(is_tty: bool) -> bool {
+    if std::env::var_os("CLICOLOR_FORCE").is_some_and(|v| v != "0" && !v.is_empty()) {
+        return true;
+    }
+    if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+        return false;
+    }
+    if std::env::var_os("CLICOLOR").is_some_and(|v| v == "0") {
+        return false;
+    }
+    if std::env::var_os("TERM").is_some_and(|v| v == "dumb") {
+        return false;
+    }
+    is_tty
+}
 
 /// Pre-formatted plain and ANSI-colored representations of a single log event.
 #[derive(Clone, Debug)]
@@ -104,7 +120,7 @@ impl LiveStream {
         Ok(Self {
             listener: Some(listener),
             clients: Vec::new(),
-            stderr_color: colored::control::SHOULD_COLORIZE.should_colorize(),
+            stderr_color: stream_supports_color(io::stderr().is_terminal()),
         })
     }
 
@@ -112,7 +128,7 @@ impl LiveStream {
         Self {
             listener: None,
             clients: Vec::new(),
-            stderr_color: colored::control::SHOULD_COLORIZE.should_colorize(),
+            stderr_color: stream_supports_color(io::stderr().is_terminal()),
         }
     }
 
@@ -164,41 +180,51 @@ impl LiveStream {
         });
     }
 
+    fn poll_client_read(client: &mut WatcherClient) -> bool {
+        let mut buf = [0u8; 1];
+        match client.stream.read(&mut buf) {
+            Ok(0) => false, // Client disconnected (EOF)
+            Ok(1) => {
+                if !client.initialized {
+                    client.log_forward = (buf[0] & FLAG_LOG_FORWARD) != 0;
+                    client.color = (buf[0] & FLAG_COLOR) != 0;
+                    client.initialized = true;
+                }
+                true
+            }
+            Ok(_) => true,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => true,
+            Err(_) => false,
+        }
+    }
+
     fn poll_clients(&mut self) {
+        // Reap any previously connected clients that have disconnected before
+        // checking capacity for newly arriving connections.
+        self.clients.retain_mut(Self::poll_client_read);
+
         if let Some(listener) = &self.listener {
-            while let Ok((stream, _)) = listener.accept() {
+            for _ in 0..MAX_CLIENTS {
+                let Ok((stream, _)) = listener.accept() else {
+                    break;
+                };
                 if self.clients.len() >= MAX_CLIENTS {
                     drop(stream);
                     continue;
                 }
                 if stream.set_nonblocking(true).is_ok() {
-                    self.clients.push(WatcherClient {
+                    let mut client = WatcherClient {
                         stream,
                         log_forward: false,
                         color: true,
                         initialized: false,
-                    });
+                    };
+                    if Self::poll_client_read(&mut client) {
+                        self.clients.push(client);
+                    }
                 }
             }
         }
-
-        self.clients.retain_mut(|client| {
-            let mut buf = [0u8; 1];
-            match client.stream.read(&mut buf) {
-                Ok(0) => false, // Client disconnected (EOF)
-                Ok(1) => {
-                    if !client.initialized {
-                        client.log_forward = (buf[0] & FLAG_LOG_FORWARD) != 0;
-                        client.color = (buf[0] & FLAG_COLOR) != 0;
-                        client.initialized = true;
-                    }
-                    true
-                }
-                Ok(_) => true,
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => true,
-                Err(_) => false,
-            }
-        });
     }
 }
 
@@ -234,7 +260,7 @@ pub fn run_client(log_forward: bool) -> Result<(), Box<dyn std::error::Error>> {
     if log_forward {
         flags |= FLAG_LOG_FORWARD;
     }
-    if colored::control::SHOULD_COLORIZE.should_colorize() {
+    if stream_supports_color(io::stdout().is_terminal()) {
         flags |= FLAG_COLOR;
     }
     stream.write_all(&[flags])?;
@@ -336,6 +362,41 @@ mod tests {
         let line = LogLine::suppress("12:00:00.000", true, "KEY_K");
         server.broadcast(&line, None);
         assert_eq!(server.clients.len(), 0);
+
+        let _ = std::fs::remove_file(&sock_path);
+    }
+
+    #[test]
+    fn disconnected_clients_at_capacity_free_slots_before_accepting_replacements() {
+        let sock_path = temp_sock_path("capacity");
+        let mut server = LiveStream::bind_at(&sock_path).unwrap();
+
+        let mut old_clients = Vec::new();
+        for _ in 0..MAX_CLIENTS {
+            let mut c = UnixStream::connect(&sock_path).unwrap();
+            c.write_all(&[0]).unwrap();
+            old_clients.push(c);
+        }
+
+        let line = LogLine::suppress("12:00:00.000", true, "KEY_K");
+        server.broadcast(&line, None);
+        assert_eq!(server.clients.len(), MAX_CLIENTS);
+
+        // Disconnect all 16 clients, then connect a replacement before the next broadcast.
+        drop(old_clients);
+        let mut replacement = UnixStream::connect(&sock_path).unwrap();
+        replacement.set_nonblocking(true).unwrap();
+        replacement.write_all(&[0]).unwrap();
+
+        server.broadcast(&line, None);
+        assert_eq!(server.clients.len(), 1);
+
+        let mut buf = [0u8; 256];
+        let n = replacement.read(&mut buf).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&buf[..n]).unwrap(),
+            format!("{}\n", line.plain)
+        );
 
         let _ = std::fs::remove_file(&sock_path);
     }
