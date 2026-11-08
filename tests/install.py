@@ -140,6 +140,15 @@ class Installation(unittest.TestCase):
         self.run_script(env=dict(self.env, VERSION="v" + VERSION))
         self.assertFalse(any(c[0] == "curl" and "-w" in c for c in self.commands()))
 
+    def test_explicit_version_takes_precedence_over_an_older_bundled_binary(self):
+        local = self.source / "keyboard-debouncer"
+        local.write_text("#!/bin/sh\necho older bundled binary\n")
+        local.chmod(0o755)
+        self.run_script(env=dict(self.env, VERSION="v" + VERSION))
+        installed = self.system / "usr/local/bin/keyboard-debouncer"
+        self.assertEqual(installed.read_bytes(), self.binary.read_bytes())
+        self.assertTrue(any(c[0] == "curl" for c in self.commands()))
+
     def test_corrupt_or_missing_checksums_prevent_system_changes(self):
         archive = self.source / "dist" / (PACKAGE + ".tar.gz")
         archive.write_bytes(archive.read_bytes() + b"corruption")

@@ -63,7 +63,7 @@ fi
 [ "$(uname -s)" = Linux ] || die "keyboard-debouncer only runs on Linux."
 command -v systemctl >/dev/null 2>&1 || die "systemd is required for service installation."
 
-if [ -z "$BINARY_SOURCE" ] && [ -n "$SCRIPT_DIR" ] && [ -x "$SCRIPT_DIR/keyboard-debouncer" ]; then
+if [ -z "$BINARY_SOURCE" ] && [ -z "${VERSION:-}" ] && [ -n "$SCRIPT_DIR" ] && [ -x "$SCRIPT_DIR/keyboard-debouncer" ]; then
     BINARY_SOURCE="$SCRIPT_DIR/keyboard-debouncer"
 fi
 
