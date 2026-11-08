@@ -5,6 +5,8 @@ see [the release guide](docs/releasing.md) for the release procedure.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-08
+
 ### Added
 
 - Linux x86_64 installation archives and SHA-256 checksums built automatically from version tags and attached before release publication, with a static daemon binary, service installer, example configuration, and Bun analytics helpers.
@@ -46,6 +48,7 @@ Rebuild and restart the daemon to begin recording monotonic timings and configur
 - Upgraded `evdev` from 0.12 to 0.13, reducing dependency footprint and pruning legacy bitflags/proc-macros.
 - Scoped documentation prerequisites to Linux platforms.
 
-[Unreleased]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/InvictusNavarchus/keyboard-debouncer/compare/v0.2.0...v0.3.0
