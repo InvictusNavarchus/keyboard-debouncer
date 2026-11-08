@@ -32,31 +32,34 @@ foreground runs with another database path need suitable directory permissions.
 
 ## Run a health report
 
-Run the following commands from the repository root.
-
-With [Bun](https://bun.sh) installed, run the read-only analytics helper. No package
-installation is needed to run it:
+With [Bun](https://bun.sh) installed, use the installed read-only report command
+from any directory. No analytics dependency installation is needed:
 
 ```bash
-bun scripts/analyze.ts --db /path/to/keys.db
-bun scripts/analyze.ts --db /path/to/keys.db --days 14
-bun scripts/analyze.ts --help
+keyboard-debouncer-report --db /path/to/keys.db
+keyboard-debouncer-report --days 14
+keyboard-debouncer-report --help
 ```
 
 The database path defaults to `/var/lib/keyboard-debouncer/keys.db`. For the
-service's private database, use the shortcut from the repository root:
+service's private database, run:
 
 ```bash
-bun run analyze
-bun run analyze --days 14
-bun run analyze --latest-config
-bun run analyze --details
-bun run analyze --latest-config --details
+keyboard-debouncer-report
+keyboard-debouncer-report --days 14
+keyboard-debouncer-report --latest-config
+keyboard-debouncer-report --details
+keyboard-debouncer-report --latest-config --details
 ```
 
 The shortcut runs the report through `sudo`, using your Bun executable's full path
 so Bun does not need to be on sudo's PATH. It may prompt for your password. All
 arguments are forwarded; use `--db PATH` to override the default database.
+
+When working from a source checkout, `bun run analyze` provides the same shortcut.
+For older releases without an installed report command, use that shortcut from
+the extracted bundle. To read an accessible database without sudo, run
+`bun scripts/analyze.ts --db PATH` from the bundle or checkout.
 
 Use `--latest-config` to report only the newest configuration period for each
 keyboard, intersected with the report window. Empty latest periods show zero

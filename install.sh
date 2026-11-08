@@ -13,89 +13,114 @@
 # Once installed, the daemon itself runs strictly UNPRIVILEGED as 'kbd-debouncer'
 # with zero root access, sandboxed by systemd directives.
 #
-# This script installs; it does not build. Run `cargo build --release` as your
-# normal user first, or point --binary at a prebuilt binary.
+# With no --binary option, install the bundled executable or download the latest
+# release. Downloads and checksum verification run before requesting sudo.
+# Source builds are explicit: --binary ./target/release/keyboard-debouncer.
 #
 set -euo pipefail
 
-DEFAULT_BINARY="target/release/keyboard-debouncer"
+REPO="InvictusNavarchus/keyboard-debouncer"
 BINARY_SOURCE=""
+TMP_DIR=""
+trap 'if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi' EXIT
 
 usage() {
-    echo "Usage: sudo ./install.sh [--binary <PATH>]"
+    echo "Usage: bash install.sh [--binary <PATH>]"
     echo ""
-    echo "  --binary <PATH>  Install this binary instead of $DEFAULT_BINARY."
-    echo "                   Relative paths resolve against your current directory."
+    echo "Downloads the latest release, or uses the executable beside this installer."
+    echo "Run the same command again to update. VERSION=vX.Y.Z selects a release."
+    echo "  --binary <PATH>  Install a local binary, with no download."
     echo "  -h, --help       Print this help."
 }
 
-# Parsed before the root check so --help works unprivileged.
+die() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --binary)
-            if [ $# -lt 2 ]; then
-                echo "Error: --binary requires a path argument." >&2
-                exit 1
-            fi
+            [ $# -ge 2 ] && [ -n "$2" ] || die "--binary requires a path."
             BINARY_SOURCE="$2"
             shift 2
             ;;
         --binary=*)
             BINARY_SOURCE="${1#--binary=}"
+            [ -n "$BINARY_SOURCE" ] || die "--binary requires a path."
             shift
             ;;
-        -h | --help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Error: unknown option '$1'. Use --help for usage." >&2
-            exit 1
-            ;;
+        -h | --help) usage; exit 0 ;;
+        *) die "Unknown option '$1'. Use --help for usage." ;;
     esac
 done
 
-# Absolutise while we are still in the caller's directory: the cd below would
-# otherwise silently reinterpret a relative path against the script's location.
-if [ -n "$BINARY_SOURCE" ]; then
-    case "$BINARY_SOURCE" in
-        /*) ;;
-        *) BINARY_SOURCE="$PWD/$BINARY_SOURCE" ;;
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+[ "$(uname -s)" = Linux ] || die "keyboard-debouncer only runs on Linux."
+command -v systemctl >/dev/null 2>&1 || die "systemd is required for service installation."
+
+if [ -z "$BINARY_SOURCE" ] && [ -n "$SCRIPT_DIR" ] && [ -x "$SCRIPT_DIR/keyboard-debouncer" ]; then
+    BINARY_SOURCE="$SCRIPT_DIR/keyboard-debouncer"
+fi
+
+if [ -z "$BINARY_SOURCE" ]; then
+    for tool in curl tar sha256sum; do
+        command -v "$tool" >/dev/null 2>&1 || die "$tool is required to download and verify releases."
+    done
+    case "$(uname -m)" in
+        x86_64 | amd64) target=x86_64-unknown-linux-musl ;;
+        *) die "Prebuilt releases support Linux x86_64. Build from source and use --binary on other architectures." ;;
     esac
+    version="${VERSION:-latest}"
+    if [ "$version" = latest ]; then
+        url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest")
+        version="${url##*/}"
+    fi
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || die "Expected a release tag such as v0.5.0; got '$version'."
+    package="keyboard-debouncer-$version-$target"
+    archive="$package.tar.gz"
+    base="https://github.com/$REPO/releases/download/$version"
+    TMP_DIR=$(mktemp -d)
+    echo "==> Downloading $version ($target)..."
+    curl -fsSL "$base/$archive" -o "$TMP_DIR/$archive"
+    curl -fsSL "$base/$archive.sha256" -o "$TMP_DIR/$archive.sha256"
+    (cd "$TMP_DIR" && sha256sum --check "$archive.sha256") || die "Release checksum verification failed."
+    tar -xzf "$TMP_DIR/$archive" -C "$TMP_DIR"
+    [ -f "$TMP_DIR/$package/install.sh" ] || die "The release archive has no installer."
+    # Use the installer and service files from the verified release together.
+    if [ "$(id -u)" -eq 0 ]; then
+        bash "$TMP_DIR/$package/install.sh" --binary "$TMP_DIR/$package/keyboard-debouncer"
+    else
+        command -v sudo >/dev/null 2>&1 || die "sudo is required to install system files."
+        sudo bash "$TMP_DIR/$package/install.sh" --binary "$TMP_DIR/$package/keyboard-debouncer"
+    fi
+    exit 0
 fi
 
-if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo "Error: Installation requires root privileges to configure system files, udev rules," >&2
-    echo "       and the dedicated 'kbd-debouncer' unprivileged system user." >&2
-    echo "       Please run: sudo ./install.sh" >&2
-    exit 1
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$BINARY_SOURCE" in
+    /*) ;;
+    *) BINARY_SOURCE="$PWD/$BINARY_SOURCE" ;;
+esac
+[ -f "$BINARY_SOURCE" ] && [ -x "$BINARY_SOURCE" ] || die "No executable binary at $BINARY_SOURCE."
+[ -n "$SCRIPT_DIR" ] || die "--binary requires a local installer and its companion files."
 cd "$SCRIPT_DIR"
+for file in keyboard-debouncer.service debouncer.conf.example uninstall.sh scripts/analyze.ts scripts/timing.ts scripts/report.sh README.md CHANGELOG.md LICENSE package.json; do
+    [ -f "$file" ] || die "Missing installation file: $file. Use the complete release bundle or source checkout."
+done
+[ -d docs ] || die "Missing installation documentation. Use the complete release bundle or source checkout."
 
-# Kept in sync by hand with uninstall.sh, which must know the same paths to be
-# able to reverse this script while remaining standalone.
+if [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null 2>&1 || die "sudo is required to install system files."
+    exec sudo bash "$SCRIPT_DIR/install.sh" --binary "$BINARY_SOURCE"
+fi
+
 UDEV_RULE_PATH=/etc/udev/rules.d/99-keyboard-debouncer.rules
 LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-uinput.rules
 UDEV_RULE_CONTENT='KERNEL=="uinput", GROUP="input", MODE="0660"'
-
-if [ -n "$BINARY_SOURCE" ]; then
-    if [ ! -f "$BINARY_SOURCE" ]; then
-        echo "Error: No binary at $BINARY_SOURCE." >&2
-        exit 1
-    fi
-else
-    BINARY_SOURCE="$DEFAULT_BINARY"
-    if [ ! -f "$BINARY_SOURCE" ]; then
-        echo "Error: Release binary not found at $DEFAULT_BINARY." >&2
-        echo "       Build it as your normal user, then re-run the installer:" >&2
-        echo "         cargo build --release" >&2
-        echo "         sudo ./install.sh" >&2
-        echo "       Or install a prebuilt binary with: --binary <PATH>" >&2
-        exit 1
-    fi
-fi
 
 # Preserve operator masks and refuse to overwrite foreign unit links.
 UNIT_PATH=/etc/systemd/system/keyboard-debouncer.service
@@ -184,6 +209,15 @@ if [ ! -f /etc/debouncer.conf ]; then
 else
     echo "    /etc/debouncer.conf already exists, skipping overwrite."
 fi
+
+echo "==> Installing reporting helpers, documentation, and uninstaller..."
+SHARE_DIR=/usr/local/share/keyboard-debouncer
+install -d -m 755 "$SHARE_DIR/scripts"
+install -m 644 scripts/analyze.ts scripts/timing.ts "$SHARE_DIR/scripts/"
+install -m 644 package.json README.md CHANGELOG.md LICENSE "$SHARE_DIR/"
+cp -R docs "$SHARE_DIR/"
+install -D -m 755 scripts/report.sh /usr/local/bin/keyboard-debouncer-report
+install -D -m 755 uninstall.sh /usr/local/bin/keyboard-debouncer-uninstall
 
 echo "==> Installing systemd service..."
 if [ "$UNIT_MASKED" -eq 0 ]; then

@@ -18,6 +18,15 @@ see [the release guide](docs/releasing.md) for the release procedure.
 - Uninstallation retains the service account, including with `--purge`, because
   ownership does not prove the account is unused by other services. Configuration
   and history remain preserved unless explicitly purged.
+- Install and update the latest prebuilt release with one command, with mandatory
+  checksum verification before system setup. Source builds remain available with
+  an explicit local binary path.
+- Reports and uninstalling no longer require retaining a source checkout or
+  extracted bundle: use `keyboard-debouncer-report` and
+  `sudo keyboard-debouncer-uninstall` from any directory.
+- Installation archives contain the executable, service setup, documentation,
+  and runtime reporting helpers; Rust source and development files remain in
+  GitHub's separate source downloads.
 
 ## [0.5.0] - 2026-11-08
 

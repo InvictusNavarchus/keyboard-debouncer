@@ -24,7 +24,7 @@ Older Git tags have no corresponding published release notes in this changelog.
 
 - Linux with the Rust toolchain and C build tools described in the
   [README](../README.md#prerequisites).
-- Python 3.9 or newer for the isolated installer/uninstaller regression tests.
+- Python 3.9 or newer for the isolated installer, uninstaller, and packaging regression tests.
 - Bun and the analytics development dependencies:
   ```bash
   cd scripts
@@ -126,8 +126,10 @@ then verifies the executable's version, help output, and static linkage.
 The workflow attaches a Linux x86_64 installation archive and its `.sha256` file
 to the draft release. The archive contains the binary, installer, uninstaller,
 systemd unit, example configuration, documentation, license, and Bun reporting
-helpers, plus the source from that exact tag. GitHub also supplies the automatic
-source archives. All assets are attached before publication, including when
+helpers. `scripts/package-release.sh` selects those files explicitly, excluding
+Rust source, tests, and development tooling. GitHub supplies the automatic source
+archives separately. Installation and packaging regressions run with
+`python3 tests/install.py` before the build. All assets are attached before publication, including when
 GitHub immutable releases are enabled.
 
 Builds use read access; only the publication job receives `contents: write` on

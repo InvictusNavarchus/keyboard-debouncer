@@ -7,6 +7,21 @@ Run repository commands from the repository root unless a step says otherwise.
 
 ## Prebuilt binaries
 
+The [README installation command](../README.md#2-install) downloads the latest
+stable release, verifies its checksum, and requests sudo for system setup.
+Running it again updates the installed application. To select a version, download
+the bootstrap and pass a release tag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/InvictusNavarchus/keyboard-debouncer/master/install.sh -o /tmp/keyboard-debouncer-install.sh
+VERSION=v0.5.0 bash /tmp/keyboard-debouncer-install.sh
+```
+
+This runs the installer shipped with the selected release; older releases may
+not provide the installed report and uninstall commands.
+
+### Manual or offline installation
+
 New version tags build a Linux x86_64 archive before release publication, named
 `keyboard-debouncer-v<VERSION>-x86_64-unknown-linux-musl.tar.gz` and a matching
 `.tar.gz.sha256` checksum file on the
@@ -36,13 +51,17 @@ Continue with [configuration and startup](../README.md#3-set-your-keyboard-and-k
 The archive includes the installer, uninstaller, systemd unit, example config,
 documentation, license, and analytics helpers. Bun is only needed for the optional
 reports; `bun run analyze` works from the extracted directory.
-The matching source is included; local configuration and development dependencies
-are excluded.
+The Rust source, tests, and development tooling are excluded; GitHub's automatic
+source archives provide those separately.
 
 For upgrades, extract the new version into its own directory and run its installer
-with `--binary` again. Existing configuration is preserved and an active service
-is restarted. Keep the extracted directory if you want to use its analytics helpers
-or uninstaller later.
+with `--binary` again. New bundles also detect the binary beside the installer,
+so `bash ./install.sh` works without a binary path. Existing configuration is
+preserved and an active service is restarted. Reporting helpers and documentation
+are installed under `/usr/local/share/keyboard-debouncer`; use
+`keyboard-debouncer-report` and `sudo keyboard-debouncer-uninstall` from any
+directory. You can discard the extracted bundle after installation. Releases
+through v0.5.0 require keeping their bundle for reports and uninstalling.
 
 ## Build prerequisites
 
@@ -100,7 +119,17 @@ need a direct device path.
 
 ## What the installer configures
 
-`sudo ./install.sh` installs the binary you have already built. It:
+The installer downloads a release by default. To build from source instead:
+
+```bash
+git clone https://github.com/InvictusNavarchus/keyboard-debouncer.git
+cd keyboard-debouncer
+cargo build --release --locked
+bash ./install.sh --binary ./target/release/keyboard-debouncer
+```
+
+`--binary` installs that local executable without downloading or compiling. The
+installer requests sudo when needed. It:
 
 - Installs the release binary to `/usr/local/bin/keyboard-debouncer`.
 - Configures the `uinput` module to load at boot.

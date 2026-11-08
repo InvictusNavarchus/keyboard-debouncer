@@ -35,24 +35,22 @@ sudo evtest
 Select your physical keyboard and press the keys that chatter. Note its device
 name and the affected `KEY_*` names, such as `KEY_K`. Exit with Ctrl-C.
 
-### 2. Build and install
+### 2. Install
 
 ```bash
-git clone https://github.com/InvictusNavarchus/keyboard-debouncer.git
-cd keyboard-debouncer
-cargo build --release
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/InvictusNavarchus/keyboard-debouncer/master/install.sh | bash
 ```
 
-If you already have a checkout, run the last two commands from its root.
-The installer creates `/etc/debouncer.conf` and installs the service. Existing
-configuration is preserved. A fresh installation does not enable or start the
-service; activation is the explicit step below. Installation and updates need
-administrative privileges, while the running daemon does not.
+The installer downloads the latest stable Linux x86_64 release and verifies its
+SHA-256 checksum before requesting sudo for system setup. No Rust toolchain or
+repository checkout is needed. It creates `/etc/debouncer.conf` and installs the
+service, reporting helpers, and uninstaller. Existing configuration is preserved.
+A fresh installation does not enable or start the service; activation is the
+explicit step below. Installation and updates need administrative privileges,
+while the running daemon does not.
 
-For releases with prebuilt Linux x86_64 assets, you can install without a Rust or
-C toolchain. See [prebuilt installation](docs/installation.md#prebuilt-binaries)
-for downloads, checksum verification, and the installer command.
+See [installation details](docs/installation.md) for offline bundles, selecting a
+specific release, and building from source on other architectures.
 
 ### 3. Set your keyboard and keys
 
@@ -113,33 +111,31 @@ restart the service to apply the changes.
 If tracking was enabled on an older version, ensure `KEYBOARD_ID` is set before
 upgrading; see [tracking and migration details](docs/health-tracking.md#upgrading-existing-databases).
 
-From the repository root:
+Run the installation command again:
 
 ```bash
-git pull --ff-only
-cargo build --release
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/InvictusNavarchus/keyboard-debouncer/master/install.sh | bash
 ```
 
-Your `/etc/debouncer.conf` is preserved. The installer restarts an active service
-to load the new binary. An inactive service remains inactive; enablement, masks,
-and drop-ins are preserved. Masked base units are not overwritten. Use
-`sudo systemctl edit keyboard-debouncer` for persistent service customization.
-Check the startup version in the logs to verify the upgrade.
+Your `/etc/debouncer.conf` and tracking database are preserved. The installer
+restarts an active service to load the new binary. An inactive service remains
+inactive; enablement, masks, and drop-ins are preserved. Masked base units are
+not overwritten. Use `sudo systemctl edit keyboard-debouncer` for persistent
+service customization. Check `keyboard-debouncer --version` and the startup
+logs to verify the upgrade.
 
 ### Uninstalling
 
-From the repository root:
-
 ```bash
-sudo ./uninstall.sh
+sudo keyboard-debouncer-uninstall
 ```
 
 This stops and disables the service and removes its installed components.
 Your configuration and tracker database are kept, as are the service account
 and shared uinput module-load configuration. To delete the configuration and
-database too, run
-`sudo ./uninstall.sh --purge`, which asks for confirmation before deletion.
+database too, run `sudo keyboard-debouncer-uninstall --purge`, which asks for
+confirmation before deletion. For older installations without this command,
+run `sudo ./uninstall.sh` from their installation bundle or a source checkout.
 See [uninstall details](docs/installation.md#uninstall-details) for shared resources
 that are deliberately retained.
 
@@ -150,6 +146,7 @@ installer tests:
 
 ```bash
 python3 tests/service_install.py
+python3 tests/install.py
 ```
 
 These tests redirect installation paths into temporary directories and mock
@@ -172,11 +169,11 @@ Restart the service to begin recording:
 sudo systemctl restart keyboard-debouncer
 ```
 
-Use the keyboard normally to collect data. With Bun installed, run the report
-from the repository root:
+Use the keyboard normally to collect data. With Bun installed, run the installed
+report command from any directory:
 
 ```bash
-bun run analyze
+keyboard-debouncer-report
 ```
 
 The report covers today in local time and shows suppressed presses and the most

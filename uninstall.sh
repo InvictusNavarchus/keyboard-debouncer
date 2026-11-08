@@ -52,7 +52,7 @@ for arg in "$@"; do
     esac
 done
 
-if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+if [ "$(id -u)" -ne 0 ]; then
     echo "Error: Uninstallation requires root privileges to remove system files," >&2
     echo "       the udev rule, and other owned system assets." >&2
     echo "       Please run: sudo ./uninstall.sh" >&2
@@ -127,6 +127,10 @@ if [ -f "$BINARY_PATH" ]; then
     rm -f "$BINARY_PATH"
 fi
 
+echo "==> Removing reporting helpers and installed documentation..."
+rm -f /usr/local/bin/keyboard-debouncer-report /usr/local/bin/keyboard-debouncer-uninstall
+rm -rf /usr/local/share/keyboard-debouncer
+
 echo "==> Removing udev rule..."
 rm -f "$UDEV_RULE_PATH"
 # Releases up to v0.1.0 used a device-named rule file that we do not own. Remove
@@ -189,7 +193,7 @@ if [ "$PURGE" -eq 0 ]; then
     fi
     if [ "$preserved" -eq 1 ]; then
         echo ""
-        echo "Preserved (remove with 'sudo ./uninstall.sh --purge'):"
+        echo "Preserved (use a fresh uninstaller with --purge to remove):"
         if [ -f "$CONFIG_PATH" ]; then
             echo "    $CONFIG_PATH"
         fi

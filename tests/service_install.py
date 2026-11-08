@@ -50,8 +50,12 @@ class ServiceInstallation(unittest.TestCase):
                 text = text.replace(prefix, str(self.host) + prefix)
             text = text.replace('${EUID:-$(id -u)}', '0').replace('"$(id -u)"', '"0"')
             (self.checkout / name).write_text(text)
-        for name in ['keyboard-debouncer.service', 'debouncer.conf.example']:
+        for name in ['keyboard-debouncer.service', 'debouncer.conf.example', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json']:
             shutil.copyfile(REPO / name, self.checkout / name)
+        shutil.copytree(REPO / 'docs', self.checkout / 'docs')
+        (self.checkout / 'scripts').mkdir()
+        for name in ['analyze.ts', 'timing.ts', 'report.sh']:
+            shutil.copyfile(REPO / 'scripts' / name, self.checkout / 'scripts' / name)
         binary = self.checkout / 'binary'
         binary.write_text('#!/bin/sh\nexit 0\n')
         binary.chmod(0o755)

@@ -50,6 +50,11 @@ jobs:
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: scripts/release-notes.sh "$PACKAGE_VERSION" > /dev/null
 
+      - name: Test installation and packaging
+        run: |
+          python3 tests/service_install.py
+          python3 tests/install.py
+
       - name: Set up Rust and musl tools
         run: |
           sudo apt-get update
@@ -82,16 +87,7 @@ jobs:
 
       - name: Package installation archive
         id: package
-        run: |
-          package="keyboard-debouncer-v$PACKAGE_VERSION-$TARGET"
-          mkdir -p "dist/$package"
-          git archive HEAD | tar -xf - -C "dist/$package"
-          install -m 755 "target/$TARGET/release/keyboard-debouncer" "dist/$package/keyboard-debouncer"
-          cd dist
-          archive="$package.tar.gz"
-          tar -czf "$archive" "$package"
-          sha256sum "$archive" > "$archive.sha256"
-          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+        run: bash scripts/package-release.sh "$PACKAGE_VERSION" "$TARGET"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
