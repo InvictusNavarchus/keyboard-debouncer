@@ -35,7 +35,7 @@ for arg in "$@"; do
     case "$arg" in
         --purge) PURGE=1 ;;
         -h|--help)
-            echo "Usage: sudo ./uninstall.sh [--purge]"
+            echo "Usage: sudo $0 [--purge]"
             echo ""
             echo "Removes the binary, systemd unit, and owned udev rule."
             echo "The service account and shared module-load entry are retained."
@@ -55,7 +55,7 @@ done
 if [ "$(id -u)" -ne 0 ]; then
     echo "Error: Uninstallation requires root privileges to remove system files," >&2
     echo "       the udev rule, and other owned system assets." >&2
-    echo "       Please run: sudo ./uninstall.sh" >&2
+    echo "       Please run: sudo $0" >&2
     exit 1
 fi
 

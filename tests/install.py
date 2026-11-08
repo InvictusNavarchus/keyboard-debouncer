@@ -186,6 +186,15 @@ class Installation(unittest.TestCase):
         self.assertIn(["bun", str(self.system / "usr/local/share/keyboard-debouncer/scripts/analyze.ts"),
                        "--db", "/a path/keys.db", "--details"], self.commands())
 
+    def test_installed_uninstaller_help_and_permission_error_use_its_own_path(self):
+        self.run_script()
+        script = "usr/local/bin/keyboard-debouncer-uninstall"
+        help_result = self.run_script(script, "--help", directory=self.system)
+        error_result = self.run_script(script, directory=self.system, ok=False)
+        invocation = "sudo " + str(self.system / script)
+        self.assertIn(invocation, help_result.stdout)
+        self.assertIn(invocation, error_result.stderr)
+
     def test_bundle_contains_only_runtime_files_even_on_repeated_packaging(self):
         staging = self.source / "dist" / PACKAGE
         (staging / "unwanted-source.rs").write_text("stale build output")
