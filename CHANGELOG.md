@@ -8,6 +8,7 @@ see [the release guide](docs/releasing.md) for the release procedure.
 ### Added
 
 - Linux x86_64 installation archives and SHA-256 checksums built automatically from version tags and attached before release publication, with a static daemon binary, service installer, example configuration, and Bun analytics helpers.
+- `-w`/`--watch` to attach to the running systemd service's private Unix socket (`/run/keyboard-debouncer/live.sock`) for instant, colored terminal output without journald buffering delay, and `--log-forward` to stream every target key event on demand without enabling verbose forwarding in `journald`.
 
 ## [0.4.0] - 2026-11-04
 

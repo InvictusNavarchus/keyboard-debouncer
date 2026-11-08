@@ -90,7 +90,13 @@ pub fn find_device_by_name(target_name: &str) -> Result<PathBuf, Box<dyn std::er
 pub enum CliAction {
     Help,
     Version,
-    Run(Option<PathBuf>),
+    Watch {
+        log_forward: bool,
+    },
+    Run {
+        config_path: Option<PathBuf>,
+        log_forward: bool,
+    },
 }
 
 pub fn parse_cli_args<I, T>(args: I) -> Result<CliAction, Box<dyn std::error::Error>>
@@ -99,6 +105,8 @@ where
     T: AsRef<str>,
 {
     let mut explicit_path: Option<PathBuf> = None;
+    let mut watch = false;
+    let mut log_forward = false;
     let mut iter = args.into_iter();
 
     while let Some(arg) = iter.next() {
@@ -106,6 +114,12 @@ where
         match s {
             "-h" | "--help" => return Ok(CliAction::Help),
             "-V" | "--version" => return Ok(CliAction::Version),
+            "-w" | "--watch" => {
+                watch = true;
+            }
+            "--log-forward" => {
+                log_forward = true;
+            }
             "-c" | "--config" => {
                 let val = iter
                     .next()
@@ -127,7 +141,17 @@ where
         }
     }
 
-    Ok(CliAction::Run(explicit_path))
+    if watch {
+        if explicit_path.is_some() {
+            return Err("Option '--watch' cannot be combined with a configuration file".into());
+        }
+        return Ok(CliAction::Watch { log_forward });
+    }
+
+    Ok(CliAction::Run {
+        config_path: explicit_path,
+        log_forward,
+    })
 }
 
 fn resolve_config_path(
@@ -152,13 +176,15 @@ fn resolve_config_path(
 }
 
 pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
-    let conf_path = match parse_cli_args(env::args().skip(1))? {
+    let (conf_path, log_forward_cli) = match parse_cli_args(env::args().skip(1))? {
         CliAction::Help => {
             println!(
                 "Usage: keyboard-debouncer [OPTIONS] [CONFIG_PATH]\n\
                  \n\
                  Options:\n\
                    -c, --config <PATH>  Path to configuration file\n\
+                   -w, --watch          Attach to the running service's live event stream\n\
+                       --log-forward    Log every forwarded target key event immediately\n\
                    -h, --help           Print help information\n\
                    -V, --version        Print version information\n\
                  \n\
@@ -171,7 +197,14 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
             println!("keyboard-debouncer {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         }
-        CliAction::Run(explicit_path) => resolve_config_path(explicit_path)?,
+        CliAction::Watch { log_forward } => {
+            crate::watch::run_client(log_forward)?;
+            std::process::exit(0);
+        }
+        CliAction::Run {
+            config_path,
+            log_forward,
+        } => (resolve_config_path(config_path)?, log_forward),
     };
 
     let conf = load_conf(&conf_path);
@@ -215,10 +248,11 @@ pub fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MICRO_EXTENDED_THRESHOLD_MS);
 
-    let log_forward = conf
-        .get("LOG_FORWARD")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let log_forward = log_forward_cli
+        || conf
+            .get("LOG_FORWARD")
+            .map(|v| v == "true")
+            .unwrap_or(false);
 
     let debounce_all = conf
         .get("DEBOUNCE_ALL_KEYS")
@@ -298,7 +332,13 @@ mod tests {
     #[test]
     fn test_parse_cli_args_empty() {
         let res = parse_cli_args(Vec::<&str>::new()).unwrap();
-        assert_eq!(res, CliAction::Run(None));
+        assert_eq!(
+            res,
+            CliAction::Run {
+                config_path: None,
+                log_forward: false
+            }
+        );
     }
 
     #[test]
@@ -306,7 +346,10 @@ mod tests {
         let res = parse_cli_args(vec!["/custom/path.conf"]).unwrap();
         assert_eq!(
             res,
-            CliAction::Run(Some(PathBuf::from("/custom/path.conf")))
+            CliAction::Run {
+                config_path: Some(PathBuf::from("/custom/path.conf")),
+                log_forward: false,
+            }
         );
     }
 
@@ -315,7 +358,10 @@ mod tests {
         let res = parse_cli_args(vec!["--config", "/etc/debouncer.conf"]).unwrap();
         assert_eq!(
             res,
-            CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf")))
+            CliAction::Run {
+                config_path: Some(PathBuf::from("/etc/debouncer.conf")),
+                log_forward: false,
+            }
         );
     }
 
@@ -324,8 +370,32 @@ mod tests {
         let res = parse_cli_args(vec!["-c", "/etc/debouncer.conf"]).unwrap();
         assert_eq!(
             res,
-            CliAction::Run(Some(PathBuf::from("/etc/debouncer.conf")))
+            CliAction::Run {
+                config_path: Some(PathBuf::from("/etc/debouncer.conf")),
+                log_forward: false,
+            }
         );
+    }
+
+    #[test]
+    fn test_parse_cli_args_watch_and_log_forward() {
+        assert_eq!(
+            parse_cli_args(vec!["--watch"]).unwrap(),
+            CliAction::Watch { log_forward: false }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["-w", "--log-forward"]).unwrap(),
+            CliAction::Watch { log_forward: true }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--log-forward"]).unwrap(),
+            CliAction::Run {
+                config_path: None,
+                log_forward: true
+            }
+        );
+        assert!(parse_cli_args(vec!["--watch", "/etc/debouncer.conf"]).is_err());
+        assert!(parse_cli_args(vec!["-w", "-c", "/etc/debouncer.conf"]).is_err());
     }
 
     #[test]
