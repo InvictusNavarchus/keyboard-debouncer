@@ -21,27 +21,27 @@ KEYS=KEY_K,KEY_L
 # Modifier keys excluded: Shift, Ctrl, Alt, Meta, CapsLock, NumLock, ScrollLock, Fn.
 # If both KEYS and DEBOUNCE_ALL_KEYS are set, all keys are debounced (KEYS becomes informational).
 # DEBOUNCE_ALL_KEYS=false
-# Debounce window in milliseconds.
-# Default: 30. Any re-press within this window after the last release is suppressed.
+# Base debounce window in milliseconds (evaluated against 'gap' in logs: release -> next press).
+# Default: 30. Any re-press with a gap within this window after the last release is suppressed.
 THRESHOLD_MS=30
 
-# Short hold duration threshold in milliseconds.
+# Short hold duration threshold in milliseconds (evaluated against 'hold' in logs: press -> release).
 # Default: 70. A hold below this (but above MICRO_HOLD_THRESHOLD_MS) arms the extended
-# debounce window. Raised to 70 ms to also catch medium bounces (59–63 ms observed in
-# hardware data) which fall above the old 40–50 ms threshold.
+# debounce window (EXTENDED_THRESHOLD_MS) for the next press. Raised to 70 ms to also catch
+# medium bounces (59–63 ms observed in hardware data) which fall above the old 40–50 ms threshold.
 SHORT_HOLD_THRESHOLD_MS=70
 
-# Extended debounce window in milliseconds.
+# Extended debounce window in milliseconds (active 'gap' threshold after a short hold).
 # Default: 100. Used after a short hold. Covers the 67–100 ms bounce gaps that follow
 # partial-contact presses.
 EXTENDED_THRESHOLD_MS=100
 
-# Micro hold duration threshold in milliseconds.
+# Micro hold duration threshold in milliseconds (evaluated against 'hold' in logs: press -> release).
 # Default: 20. A hold below this is classified as hardware ghost contact — no human
-# intentionally holds a key for less than 20 ms. Arms the micro-extended window.
+# intentionally holds a key for less than 20 ms. Arms the micro-extended window (MICRO_EXTENDED_THRESHOLD_MS).
 MICRO_HOLD_THRESHOLD_MS=20
 
-# Micro-extended debounce window in milliseconds.
+# Micro-extended debounce window in milliseconds (active 'gap' threshold after a micro hold).
 # Default: 150. Used after a micro hold. Covers the 79–99 ms bounce gaps that follow
 # 3–11 ms ghost contacts. Safe for double-letter typing ("ee", "oo") since conscious
 # same-key re-strikes at 120 WPM are typically 160–220 ms.
