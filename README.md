@@ -145,7 +145,8 @@ that are deliberately retained.
 
 ## Installer checks
 
-Development and release validation use Python 3 for isolated installer tests:
+Development and release validation require Python 3.9 or newer for isolated
+installer tests:
 
 ```bash
 python3 tests/service_install.py
