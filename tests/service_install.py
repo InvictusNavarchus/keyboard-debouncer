@@ -17,8 +17,15 @@ if name == 'systemctl':
     if os.environ.get('FAIL_ACTION') == args[0]: sys.exit(1)
     if args[0] == 'is-active': sys.exit(0 if os.environ.get('ACTIVE') else 3)
     if args[0] == 'is-enabled':
+        marker = os.environ.get('ENABLED_LINK')
+        if marker:
+            enabled = pathlib.Path(marker).is_symlink()
+            print('enabled' if enabled else 'disabled')
+            sys.exit(0 if enabled else 1)
         print(os.environ.get('UNIT_STATE', 'disabled'))
         sys.exit(0 if os.environ.get('UNIT_STATE') == 'enabled' else 1)
+    if args[0] == 'disable' and os.environ.get('ENABLED_LINK'):
+        pathlib.Path(os.environ['ENABLED_LINK']).unlink(missing_ok=True)
 '''
 
 
@@ -80,6 +87,33 @@ class ServiceInstallation(unittest.TestCase):
         self.assertIn(['systemctl', 'try-restart', 'keyboard-debouncer'], self.commands())
         self.assertFalse(any(c[:2] == ['systemctl', 'enable'] for c in self.commands()))
         self.assertEqual(override.read_text(), '[Service]\nNice=10\n')
+
+    def test_enabled_update_preserves_startup_independently_from_activity(self):
+        self.unit.write_bytes((REPO / 'keyboard-debouncer.service').read_bytes())
+        enabled = self.unit.parent / 'multi-user.target.wants/keyboard-debouncer.service'
+        enabled.parent.mkdir()
+        enabled.symlink_to('../keyboard-debouncer.service')
+        for active in ['', '1']:
+            with self.subTest(active=bool(active)):
+                self.log.unlink(missing_ok=True)
+                self.install(ACTIVE=active, ENABLED_LINK=str(enabled))
+                self.assertEqual(os.readlink(enabled), '../keyboard-debouncer.service')
+                actions = [c[1] for c in self.commands() if c[0] == 'systemctl']
+                self.assertNotIn('enable', actions)
+                self.assertNotIn('disable', actions)
+                self.assertEqual('try-restart' in actions, bool(active))
+
+        self.log.unlink()
+        result = subprocess.run(['bash', str(self.checkout / 'uninstall.sh')],
+                                env=dict(self.env, ACTIVE='1', ENABLED_LINK=str(enabled)),
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertFalse(enabled.is_symlink())
+        self.assertFalse(self.unit.exists())
+        commands = self.commands()
+        stop = commands.index(['systemctl', 'stop', 'keyboard-debouncer'])
+        disable = commands.index(['systemctl', 'disable', 'keyboard-debouncer'])
+        self.assertLess(stop, disable)
 
     def test_mask_is_preserved_and_foreign_unit_symlink_is_rejected(self):
         self.unit.symlink_to('/dev/null')
