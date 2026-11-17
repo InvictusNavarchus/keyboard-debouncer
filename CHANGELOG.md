@@ -12,7 +12,9 @@ see [the release guide](docs/releasing.md) for the release procedure.
   restarted; fresh activation remains explicit.
   Empty-file masks, relative `/dev/null` links, and runtime masks are preserved.
   After explicitly unmasking, rerun installation before enabling the service.
-- Installation preserves existing `/usr/local/bin` directory permissions.
+- Installation preserves existing `/usr/local/bin` directory permissions and
+  creates missing binary-directory parents with traversable permissions even
+  under a restrictive root umask.
 - Uninstallation retains the service account, including with `--purge`, because
   ownership does not prove the account is unused by other services. Configuration
   and history remain preserved unless explicitly purged.

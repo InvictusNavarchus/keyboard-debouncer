@@ -63,9 +63,9 @@ class ServiceInstallation(unittest.TestCase):
     def commands(self):
         return [json.loads(x) for x in self.log.read_text().splitlines()]
 
-    def install(self, *, ok=True, **env):
+    def install(self, *, ok=True, umask=-1, **env):
         p = subprocess.run(['bash', str(self.checkout / 'install.sh'), '--binary', str(self.binary)],
-                           env=dict(self.env, **env), capture_output=True, text=True)
+                           env=dict(self.env, **env), capture_output=True, text=True, umask=umask)
         self.assertEqual(p.returncode == 0, ok, p.stdout+p.stderr)
         return p
 
@@ -198,8 +198,16 @@ class ServiceInstallation(unittest.TestCase):
     def test_install_preserves_existing_binary_directory_permissions(self):
         bindir = self.host / 'usr/local/bin'
         bindir.mkdir(parents=True, mode=0o700)
-        self.install()
+        self.install(umask=0o077)
         self.assertEqual(bindir.stat().st_mode & 0o777, 0o700)
+
+    def test_fresh_install_creates_traversable_binary_parents_with_restrictive_umask(self):
+        self.assertFalse((self.host / 'usr').exists())
+        self.install(umask=0o077)
+        for relative in ['usr', 'usr/local', 'usr/local/bin']:
+            with self.subTest(directory=relative):
+                self.assertEqual((self.host / relative).stat().st_mode & 0o777, 0o755)
+        self.assertTrue(os.access(self.host / 'usr/local/bin/keyboard-debouncer', os.X_OK))
 
     def test_failed_stop_preserves_installed_binary(self):
         self.install()

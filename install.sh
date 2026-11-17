@@ -119,7 +119,11 @@ elif [ -f "$UNIT_PATH" ] && [ ! -s "$UNIT_PATH" ]; then
 fi
 
 echo "==> Installing binary to /usr/local/bin..."
-mkdir -p -m 755 /usr/local/bin
+# install -d creates traversable parents even with a restrictive root umask,
+# but must not reset an existing administrator-managed destination's mode.
+if [ ! -d /usr/local/bin ]; then
+    install -d -m 755 /usr/local/bin
+fi
 INSTALL_STAGE=$(mktemp -d /usr/local/bin/.keyboard-debouncer-install.XXXXXX)
 trap 'rm -rf -- "$INSTALL_STAGE"' EXIT
 install -m 755 "$BINARY_SOURCE" "$INSTALL_STAGE/keyboard-debouncer"

@@ -124,6 +124,10 @@ The binary is staged on its destination
 filesystem and atomically replaced, so a running process keeps a complete old
 executable until the documented restart.
 
+Existing `/usr/local/bin` permissions are preserved. If that directory is
+missing, it and any missing parents are created with mode `0755` so the service
+account can reach the executable even when root uses a restrictive umask.
+
 The installer uses `sudo` to configure system files, accounts, and device
 permissions. The service runs as the unprivileged `kbd-debouncer` user with
 `ProtectSystem=strict`, `ProtectHome=true`, and `NoNewPrivileges=true`.
