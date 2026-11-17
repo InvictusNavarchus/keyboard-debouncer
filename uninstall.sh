@@ -3,7 +3,7 @@
 # keyboard-debouncer system uninstaller — reverses install.sh.
 #
 # Requires root for the same reasons the installer does: it removes system
-# files, the udev rule, and the dedicated 'kbd-debouncer' system user.
+# files, the udev rule, and other owned system assets.
 #
 # /etc/modules-load.d/uinput.conf is deliberately never removed — see the
 # reasoning at that step.
@@ -22,11 +22,6 @@ UNIT_PATH=/etc/systemd/system/keyboard-debouncer.service
 CONFIG_PATH=/etc/debouncer.conf
 STATE_DIR=/var/lib/keyboard-debouncer
 DAEMON_USER=kbd-debouncer
-# install.sh stamps the account with this GECOS comment and always has, so it
-# serves as an ownership marker for existing installs too — no new state, no
-# migration.
-DAEMON_USER_COMMENT='keyboard-debouncer daemon'
-
 # Kept in sync by hand with install.sh. Duplicated rather than sourced from a
 # shared file so this script stays standalone — it must work when fetched on its
 # own, without the rest of the tree.
@@ -42,8 +37,8 @@ for arg in "$@"; do
         -h|--help)
             echo "Usage: sudo ./uninstall.sh [--purge]"
             echo ""
-            echo "Removes the binary, systemd unit, udev rule, boot-time module"
-            echo "entry, and the '$DAEMON_USER' system user."
+            echo "Removes the binary, systemd unit, and owned udev rule."
+            echo "The service account and shared module-load entry are retained."
             echo ""
             echo "  --purge   Also delete $CONFIG_PATH and"
             echo "            $STATE_DIR (your tuned configuration"
@@ -59,7 +54,7 @@ done
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     echo "Error: Uninstallation requires root privileges to remove system files," >&2
-    echo "       the udev rule, and the '$DAEMON_USER' system user." >&2
+    echo "       the udev rule, and other owned system assets." >&2
     echo "       Please run: sudo ./uninstall.sh" >&2
     exit 1
 fi
@@ -174,27 +169,15 @@ if [ "$PURGE" -eq 1 ]; then
         rm -rf "$STATE_DIR"
     fi
 elif [ -d "$STATE_DIR" ]; then
-    # Hand preserved data to root before the owning account disappears. Files
-    # left owned by an unmapped uid would be inherited by whichever account a
-    # future useradd assigns that uid to — which for a keystroke database means
-    # handing an unrelated service read access to it.
+    # Restrict retained keystroke history to root after stopping the daemon.
     echo "==> Preserving $STATE_DIR; reassigning ownership to root..."
     chown -R root:root "$STATE_DIR"
 fi
 
+# Keep the account: an ownership marker does not prove no other service uses it.
+# Removal of shared accounts and groups is a separate administrative decision.
 if id -u "$DAEMON_USER" >/dev/null 2>&1; then
-    # Delete the account only if we are the ones who made it. Sharing a name is
-    # not evidence of ownership, and userdel on someone else's system account is
-    # not something they can undo from the message we print.
-    # cut twice: field 5 is GECOS, whose first comma-separated subfield is the
-    # comment useradd --comment sets; later tools may append empty subfields.
-    actual_comment="$(getent passwd "$DAEMON_USER" | cut -d: -f5 | cut -d, -f1)"
-    if [ "$actual_comment" = "$DAEMON_USER_COMMENT" ]; then
-        echo "==> Removing system user '$DAEMON_USER'..."
-        userdel "$DAEMON_USER"
-    else
-        echo "==> Leaving user '$DAEMON_USER' in place (not created by this installer)."
-    fi
+    echo "==> Leaving system user '$DAEMON_USER' in place; other services may use it."
 fi
 
 echo ""

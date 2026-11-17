@@ -10,6 +10,7 @@ else
 fi
 bash scripts/release-notes.sh "$version" > /dev/null
 
+python3 tests/service_install.py
 cargo test --locked
 (
     cd scripts

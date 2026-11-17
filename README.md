@@ -21,7 +21,10 @@ packages. Basic filtering needs neither Bun nor a tracker database.
 
 Install the systemd service so filtering starts at boot and runs without an open
 terminal. The installer configures device permissions; the service runs as the
-unprivileged `kbd-debouncer` user.
+unprivileged `kbd-debouncer` user. System scope preserves that dedicated identity
+and grants input/uinput access without granting it to your personal account.
+Filtering starts once the input device is available, including at the login screen
+and on text consoles. Neither a desktop session nor user lingering is required.
 
 ### 1. Identify your keyboard and affected keys
 
@@ -43,7 +46,9 @@ sudo ./install.sh
 
 If you already have a checkout, run the last two commands from its root.
 The installer creates `/etc/debouncer.conf` and installs the service. Existing
-configuration is preserved.
+configuration is preserved. A fresh installation does not enable or start the
+service; activation is the explicit step below. Installation and updates need
+administrative privileges, while the running daemon does not.
 
 For releases with prebuilt Linux x86_64 assets, you can install without a Rust or
 C toolchain. See [prebuilt installation](docs/installation.md#prebuilt-binaries)
@@ -117,7 +122,10 @@ sudo ./install.sh
 ```
 
 Your `/etc/debouncer.conf` is preserved. The installer restarts an active service
-to load the new binary. Check the startup version in the logs to verify the upgrade.
+to load the new binary. An inactive service remains inactive; enablement, masks,
+and drop-ins are preserved. Masked base units are not overwritten. Use
+`sudo systemctl edit keyboard-debouncer` for persistent service customization.
+Check the startup version in the logs to verify the upgrade.
 
 ### Uninstalling
 
@@ -128,10 +136,24 @@ sudo ./uninstall.sh
 ```
 
 This stops and disables the service and removes its installed components.
-Your configuration and tracker database are kept. To delete those too, run
+Your configuration and tracker database are kept, as are the service account
+and shared uinput module-load configuration. To delete the configuration and
+database too, run
 `sudo ./uninstall.sh --purge`, which asks for confirmation before deletion.
 See [uninstall details](docs/installation.md#uninstall-details) for shared resources
 that are deliberately retained.
+
+## Installer checks
+
+Development and release validation use Python 3 for isolated installer tests:
+
+```bash
+python3 tests/service_install.py
+```
+
+These tests redirect installation paths into temporary directories and mock
+systemd, account, and device administration. They do not access real input devices
+or change installed services. Python is not a daemon runtime requirement.
 
 ## Optional health tracking
 

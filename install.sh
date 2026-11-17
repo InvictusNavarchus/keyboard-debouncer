@@ -3,7 +3,7 @@
 # keyboard-debouncer system installer
 #
 # Note on privileges:
-# This installer requires root (sudo) ONCE to provision system-level assets:
+# This installer requires root (sudo) for installation and updates to provision system-level assets:
 #   - Installing the binary to /usr/local/bin/
 #   - Registering the 'uinput' kernel module at boot (/etc/modules-load.d/)
 #   - Creating the dedicated unprivileged system user ('kbd-debouncer')
@@ -97,8 +97,27 @@ else
     fi
 fi
 
+# Preserve operator masks and refuse to overwrite foreign unit links.
+UNIT_PATH=/etc/systemd/system/keyboard-debouncer.service
+UNIT_MASKED=0
+if [ -L "$UNIT_PATH" ]; then
+    if [ "$(readlink "$UNIT_PATH")" = /dev/null ]; then
+        UNIT_MASKED=1
+    else
+        echo "Error: Refusing to replace symlink unit $UNIT_PATH." >&2
+        exit 1
+    fi
+elif [ -e "$UNIT_PATH" ] && [ ! -f "$UNIT_PATH" ]; then
+    echo "Error: Refusing to replace non-regular unit $UNIT_PATH." >&2
+    exit 1
+fi
+
 echo "==> Installing binary to /usr/local/bin..."
-install -D -m 755 "$BINARY_SOURCE" /usr/local/bin/keyboard-debouncer
+install -d -m 755 /usr/local/bin
+INSTALL_STAGE=$(mktemp -d /usr/local/bin/.keyboard-debouncer-install.XXXXXX)
+trap 'rm -rf -- "$INSTALL_STAGE"' EXIT
+install -m 755 "$BINARY_SOURCE" "$INSTALL_STAGE/keyboard-debouncer"
+mv -fT "$INSTALL_STAGE/keyboard-debouncer" /usr/local/bin/keyboard-debouncer
 
 echo "==> Ensuring 'uinput' kernel module loads on boot..."
 mkdir -p /etc/modules-load.d
@@ -157,7 +176,11 @@ else
 fi
 
 echo "==> Installing systemd service..."
-install -D -m 644 keyboard-debouncer.service /etc/systemd/system/keyboard-debouncer.service
+if [ "$UNIT_MASKED" -eq 0 ]; then
+    install -D -m 644 keyboard-debouncer.service "$UNIT_PATH"
+else
+    echo "    Existing service mask preserved."
+fi
 
 SERVICE_WAS_ACTIVE=0
 if command -v systemctl >/dev/null 2>&1; then
@@ -171,13 +194,13 @@ fi
 # process keeps executing the old inode, and `daemon-reload` only re-reads unit
 # files — neither picks up the new binary. Without this explicit restart an
 # upgrade reports success while the old code keeps running.
-if [ "$SERVICE_WAS_ACTIVE" -eq 1 ]; then
+if [ "$SERVICE_WAS_ACTIVE" -eq 1 ] && [ "$UNIT_MASKED" -eq 0 ]; then
     echo "==> Service is running; restarting to activate the new binary..."
-    systemctl restart keyboard-debouncer
+    systemctl try-restart keyboard-debouncer
 fi
 
 echo ""
-if [ "$SERVICE_WAS_ACTIVE" -eq 1 ]; then
+if [ "$SERVICE_WAS_ACTIVE" -eq 1 ] && [ "$UNIT_MASKED" -eq 0 ]; then
     echo "Upgrade successful — service restarted on the new binary."
     echo "Verify with:"
     echo "  keyboard-debouncer --version"
@@ -186,6 +209,7 @@ else
     echo "Installation successful!"
     echo "Next steps:"
     echo "  1. Edit your settings: sudo nano /etc/debouncer.conf"
-    echo "  2. Enable and start:   sudo systemctl enable --now keyboard-debouncer"
+    echo "  2. Activation unchanged; when ready: sudo systemctl enable --now keyboard-debouncer"
+    echo "     If masked, explicitly unmask first. Enablement and drop-ins are preserved."
     echo "  3. Check status:       sudo systemctl status keyboard-debouncer"
 fi

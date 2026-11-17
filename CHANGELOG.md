@@ -5,6 +5,15 @@ see [the release guide](docs/releasing.md) for the release procedure.
 
 ## [Unreleased]
 
+### Changed
+
+- System-service updates preserve masks, enablement, inactive state, and drop-ins.
+  Executables are atomically replaced and only an active, unmasked daemon is
+  restarted; fresh activation remains explicit.
+- Uninstallation retains the service account, including with `--purge`, because
+  ownership does not prove the account is unused by other services. Configuration
+  and history remain preserved unless explicitly purged.
+
 ## [0.5.0] - 2026-11-08
 
 ### Added
