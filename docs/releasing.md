@@ -24,6 +24,7 @@ Older Git tags have no corresponding published release notes in this changelog.
 
 - Linux with the Rust toolchain and C build tools described in the
   [README](../README.md#prerequisites).
+- Python 3 for the isolated installer/uninstaller regression tests.
 - Bun and the analytics development dependencies:
   ```bash
   cd scripts
@@ -56,7 +57,8 @@ cargo release 0.4.1
 
 This defaults to a dry run. Review the planned version, changelog replacements,
 commit, tag, and push. The pre-release hook refuses missing or empty release
-notes, then runs Rust tests, analytics type checking and tests, a release build,
+notes, then runs isolated installer/uninstaller tests with Python 3, Rust tests,
+analytics type checking and tests, a release build,
 and the binary's `--version` command. Any failed check stops the release before
 the release commit is created.
 
