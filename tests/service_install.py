@@ -161,6 +161,12 @@ class ServiceInstallation(unittest.TestCase):
         self.assertEqual(installed.stat().st_ino, before)
         self.assertFalse(list(installed.parent.glob('.keyboard-debouncer-install.*')))
 
+    def test_install_preserves_existing_binary_directory_permissions(self):
+        bindir = self.host / 'usr/local/bin'
+        bindir.mkdir(parents=True, mode=0o700)
+        self.install()
+        self.assertEqual(bindir.stat().st_mode & 0o777, 0o700)
+
     def test_failed_stop_preserves_installed_binary(self):
         self.install()
         p = subprocess.run(['bash', str(self.checkout / 'uninstall.sh')],
