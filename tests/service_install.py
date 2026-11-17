@@ -16,7 +16,9 @@ if name == 'pgrep': sys.exit(1)
 if name == 'systemctl':
     if os.environ.get('FAIL_ACTION') == args[0]: sys.exit(1)
     if args[0] == 'is-active': sys.exit(0 if os.environ.get('ACTIVE') else 3)
-    if args[0] == 'is-enabled': sys.exit(1)
+    if args[0] == 'is-enabled':
+        print(os.environ.get('UNIT_STATE', 'disabled'))
+        sys.exit(0 if os.environ.get('UNIT_STATE') == 'enabled' else 1)
 '''
 
 
@@ -92,6 +94,35 @@ class ServiceInstallation(unittest.TestCase):
         self.install(ok=False)
         self.assertEqual(installed.read_bytes(), before)
         self.assertEqual(foreign.read_text(), 'operator unit')
+
+    def test_empty_file_mask_is_preserved_without_restart(self):
+        self.unit.touch()
+        self.install(ACTIVE='1')
+        self.assertEqual(self.unit.read_bytes(), b'')
+        self.assertFalse(any(c[:2] == ['systemctl', 'try-restart'] for c in self.commands()))
+
+    def test_relative_mask_is_preserved(self):
+        target = os.path.relpath('/dev/null', self.unit.parent)
+        self.unit.symlink_to(target)
+        self.install()
+        self.assertEqual(os.readlink(self.unit), target)
+
+    def test_runtime_mask_is_not_shadowed_by_a_new_persistent_unit(self):
+        runtime = self.host / 'run/systemd/system/keyboard-debouncer.service'
+        runtime.parent.mkdir(parents=True)
+        runtime.symlink_to('/dev/null')
+        self.install(UNIT_STATE='masked-runtime', ACTIVE='1')
+        self.assertFalse(self.unit.exists())
+        self.assertEqual(os.readlink(runtime), '/dev/null')
+        self.assertFalse(any(c[:2] == ['systemctl', 'try-restart'] for c in self.commands()))
+
+    def test_masked_first_install_requires_reinstall_after_unmasking(self):
+        self.unit.symlink_to('/dev/null')
+        result = self.install()
+        self.assertIn('rerun', result.stdout.lower())
+        self.unit.unlink()  # Simulate the explicit operator unmask.
+        self.install()
+        self.assertEqual(self.unit.read_bytes(), (REPO / 'keyboard-debouncer.service').read_bytes())
 
     def test_uninstall_preserves_account_data_and_lingering(self):
         self.install()

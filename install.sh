@@ -100,8 +100,12 @@ fi
 # Preserve operator masks and refuse to overwrite foreign unit links.
 UNIT_PATH=/etc/systemd/system/keyboard-debouncer.service
 UNIT_MASKED=0
+if command -v systemctl >/dev/null 2>&1; then
+    UNIT_STATE=$(systemctl is-enabled keyboard-debouncer.service 2>/dev/null || true)
+    case "$UNIT_STATE" in masked|masked-runtime) UNIT_MASKED=1 ;; esac
+fi
 if [ -L "$UNIT_PATH" ]; then
-    if [ "$(readlink "$UNIT_PATH")" = /dev/null ]; then
+    if [ "$(readlink -f "$UNIT_PATH")" = /dev/null ]; then
         UNIT_MASKED=1
     else
         echo "Error: Refusing to replace symlink unit $UNIT_PATH." >&2
@@ -110,6 +114,8 @@ if [ -L "$UNIT_PATH" ]; then
 elif [ -e "$UNIT_PATH" ] && [ ! -f "$UNIT_PATH" ]; then
     echo "Error: Refusing to replace non-regular unit $UNIT_PATH." >&2
     exit 1
+elif [ -f "$UNIT_PATH" ] && [ ! -s "$UNIT_PATH" ]; then
+    UNIT_MASKED=1
 fi
 
 echo "==> Installing binary to /usr/local/bin..."
@@ -209,7 +215,11 @@ else
     echo "Installation successful!"
     echo "Next steps:"
     echo "  1. Edit your settings: sudo nano /etc/debouncer.conf"
+    if [ "$UNIT_MASKED" -eq 1 ]; then
+        echo "     Service definition was not replaced because a mask is in force."
+        echo "     To activate, explicitly unmask and rerun this installer with the same --binary option first."
+    fi
     echo "  2. Activation unchanged; when ready: sudo systemctl enable --now keyboard-debouncer"
-    echo "     If masked, explicitly unmask first. Enablement and drop-ins are preserved."
+    echo "     Enablement and drop-ins are preserved."
     echo "  3. Check status:       sudo systemctl status keyboard-debouncer"
 fi

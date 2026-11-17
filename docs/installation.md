@@ -114,8 +114,13 @@ need a direct device path.
 On a fresh installation, edit `/etc/debouncer.conf` and enable the service as
 shown in the README. The installer does not start an inactive service or change
 enablement. Existing
-masks and drop-ins survive updates. A masked base unit is retained; other symlink
-units are refused before replacement. The binary is staged on its destination
+masks and drop-ins survive updates, including empty-file masks, relative links
+to `/dev/null`, and runtime masks reported by systemd. A masked base unit is
+retained, and a runtime mask is not shadowed with a new persistent unit. Other
+symlink units are refused before replacement. To activate a masked installation,
+explicitly unmask it, rerun the installer with the same binary selection to
+create or update its service definition, then enable and start the service.
+The binary is staged on its destination
 filesystem and atomically replaced, so a running process keeps a complete old
 executable until the documented restart.
 
