@@ -112,7 +112,21 @@ need a direct device path.
   and restarts the service if it is already running.
 
 On a fresh installation, edit `/etc/debouncer.conf` and enable the service as
-shown in the README. The installer does not start an inactive service.
+shown in the README. The installer does not start an inactive service or change
+enablement. Existing
+masks and drop-ins survive updates, including empty-file masks, relative links
+to `/dev/null`, and runtime masks reported by systemd. A masked base unit is
+retained, and a runtime mask is not shadowed with a new persistent unit. Other
+symlink units are refused before replacement. To activate a masked installation,
+explicitly unmask it, rerun the installer with the same binary selection to
+create or update its service definition, then enable and start the service.
+The binary is staged on its destination
+filesystem and atomically replaced, so a running process keeps a complete old
+executable until the documented restart.
+
+Existing `/usr/local/bin` permissions are preserved. If that directory is
+missing, it and any missing parents are created with mode `0755` so the service
+account can reach the executable even when root uses a restrictive umask.
 
 The installer uses `sudo` to configure system files, accounts, and device
 permissions. The service runs as the unprivileged `kbd-debouncer` user with
@@ -133,8 +147,10 @@ Re-running the installer preserves `/etc/debouncer.conf` and creates the service
 account only if absent. The udev rule and module-load entry are rewritten to their
 expected contents on each run.
 
-An active service is restarted to pick up the installed binary. Replacing the
-binary on disk does not change the executable used by an existing process, and
+An active, unmasked service is restarted to pick up the installed binary using
+`systemctl try-restart`; an inactive service is not started. A restart failure
+makes installation fail rather than reporting a successful activation. Replacing
+the binary on disk does not change the executable used by an existing process, and
 `systemctl daemon-reload` only reloads unit definitions. The daemon logs its
 version at startup; inspect `journalctl -u keyboard-debouncer -b` to check which
 version a run used.
@@ -287,13 +303,22 @@ The uninstaller deliberately leaves these resources alone:
   tell ours from one you or another package wrote. Deleting it wrongly would
   break unrelated software one reboot later with nothing pointing back here, so
   it stays. Remove it by hand if nothing else on the system needs `/dev/uinput`.
-- **A `kbd-debouncer` account this installer did not create.** Ownership is
-  checked against the comment field `install.sh` sets, not the name alone.
+- **The `kbd-debouncer` account**, including one created by this installer.
+  An ownership marker cannot establish that no other service uses the account;
+  remove it separately only after inspecting shared use.
 - **The `input` group**, which comes from your distribution rather than from this
   project.
 
 If a copy of the daemon is still running outside systemd — started by hand
 rather than through the service — the uninstaller warns and tells you how to
 stop it, but continues.
+
+### Service account retention
+
+Ordinary removal and `--purge` retain the `kbd-debouncer` account. The installer's
+ownership marker cannot establish that no other service uses it. Account/group
+removal is a separate administrative decision after inspecting shared use.
+Preserved tracking data is reassigned to root; reinstallation restores the daemon's
+ownership before collection. Neither installation nor removal changes lingering.
 
 [Back to the README](../README.md)
